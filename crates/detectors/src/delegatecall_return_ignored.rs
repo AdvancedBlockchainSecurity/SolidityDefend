@@ -182,15 +182,14 @@ impl DelegatecallReturnIgnoredDetector {
             // FP Reduction: If there's a revert anywhere after delegatecall, it may be handling errors
             let has_revert = source.contains("revert(") || source.contains("revert ");
 
-            // FP Reduction: If the function returns the success value, the caller handles it
-            if source.contains("return success") || source.contains("return result") {
-                return false; // Caller is responsible for checking
-            }
-
             // FP Reduction: Skip if there's error handling via revert
             if has_revert {
                 return false;
             }
+
+            // Note: `return success` alone is NOT a valid validation — the caller may
+            // ignore it, so this case (captured-but-not-checked) is still a finding.
+            // Ground truth: CapturedButNotChecked.execute pattern.
 
             return true;
         }
@@ -422,5 +421,89 @@ mod tests {
     fn test_default() {
         let detector = DelegatecallReturnIgnoredDetector::default();
         assert_eq!(detector.id().0, "delegatecall-return-ignored");
+    }
+
+    #[test]
+    fn test_has_statement_delegatecall() {
+        let detector = DelegatecallReturnIgnoredDetector::new();
+
+        let stmt = "        implementation.delegatecall(data);";
+        assert!(detector.has_statement_delegatecall(stmt));
+
+        let assigned = "        (bool success, ) = implementation.delegatecall(data);";
+        assert!(!detector.has_statement_delegatecall(assigned));
+    }
+
+    #[test]
+    fn test_unvalidated_delegatecall_return_success_is_not_validation() {
+        let detector = DelegatecallReturnIgnoredDetector::new();
+
+        let captured_but_returned = r#"
+            function execute(bytes calldata data) external returns (bool) {
+                (bool success, ) = implementation.delegatecall(data);
+                return success;
+            }
+        "#;
+        assert!(
+            detector.has_unvalidated_delegatecall(captured_but_returned),
+            "return success without require/if should be flagged"
+        );
+    }
+
+    #[test]
+    fn test_unvalidated_delegatecall_with_require_is_safe() {
+        let detector = DelegatecallReturnIgnoredDetector::new();
+
+        let validated = r#"
+            function execute(bytes calldata data) external returns (bool) {
+                (bool success, bytes memory result) = implementation.delegatecall(data);
+                require(success, "Delegatecall failed");
+                return success;
+            }
+        "#;
+        assert!(
+            !detector.has_unvalidated_delegatecall(validated),
+            "require(success) should not be flagged"
+        );
+    }
+
+    #[test]
+    fn test_unvalidated_delegatecall_with_if_check_is_safe() {
+        let detector = DelegatecallReturnIgnoredDetector::new();
+
+        let validated = r#"
+            function execute(bytes calldata data) external {
+                (bool success, ) = implementation.delegatecall(data);
+                if (!success) revert("Failed");
+            }
+        "#;
+        assert!(
+            !detector.has_unvalidated_delegatecall(validated),
+            "if (!success) revert should not be flagged"
+        );
+    }
+
+    #[test]
+    fn test_data_only_capture() {
+        let detector = DelegatecallReturnIgnoredDetector::new();
+
+        let data_only = r#"
+            (, bytes memory result) = implementation.delegatecall(data);
+            return result;
+        "#;
+        assert!(
+            detector.has_data_only_capture(data_only),
+            "success bool discarded should be flagged"
+        );
+
+        let both_captured = r#"
+            (bool success, bytes memory result) = implementation.delegatecall(data);
+            require(success, "Failed");
+            return result;
+        "#;
+        assert!(
+            !detector.has_data_only_capture(both_captured),
+            "both captured should not be flagged"
+        );
     }
 }

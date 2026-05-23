@@ -28,16 +28,29 @@ cargo test -p detectors
 cargo test -- --nocapture
 ```
 
-### Test Results (v1.10.20)
+### Test Results (v2.0.10)
 
 ```
-Total: 1,593 tests passed (1,392 detector + 32 FP regression + 17 front-running)
-Ground truth: 117 contracts (43 clean, 74 vulnerable, 78 expected TPs)
+Total: 444 detector tests + 4 parser tests + 13 IR tests
+Ground truth: 122 contracts (43 clean, 79 vulnerable, 149 expected TPs)
 Ground truth coverage: 100% of test corpus
 Clean contract FP rate: 0% (across 43 clean/secure contracts)
-Parse errors: 0 (all 117 contracts parse successfully)
-Recall: 100% (78/78 TPs detected, 0 false negatives)
+Parse errors: 0 (all 122 contracts parse successfully)
+Recall: 100% (149/149 TPs detected, 0 false negatives)
+External validation: 63 contracts from vulnerable-smart-contract-examples (222 findings, 0 errors)
 ```
+
+### Regression Test Coverage (v2.0.10)
+
+The following detectors have inline unit tests for their core detection logic:
+
+| Detector | Tests | Key coverage |
+|----------|-------|-------------|
+| `classic-reentrancy` | 5 | Pull-payment pattern (skip vs. not-skip), OZ PullPayment, escrow |
+| `missing-access-modifiers` | 11 | Ownership-change verbs, inline access control, proxy context |
+| `unchecked-external-call` | 5 | Call-options wrapper peeling, array exclusion, inline success check |
+| `delegatecall-return-ignored` | 7 | Statement detection, captured-but-not-validated, require/if checks |
+| `bridge-token-mint-control` | 7 | Empty modifier detection, require/revert/checkRole, inherited modifiers |
 
 ## Real-World Contract Testing
 

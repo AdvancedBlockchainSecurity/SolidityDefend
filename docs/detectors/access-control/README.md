@@ -194,7 +194,11 @@ Detects unsafe EIP-7702 delegation patterns that can brick hardware wallets or c
 
 ### Description
 
-Detects functions that perform critical operations without proper access control modifiers
+Detects functions that perform critical operations without proper access control modifiers.
+
+### Admin-Only Patterns (v2.0.10)
+
+Functions are flagged when their name contains ownership-change or privileged-operation verbs, including: `setOwner`, `changeOwner`, `updateOwner`, `swapOwner`, `replaceOwner`, `newOwner`, `changeAdmin`, `updateAdmin`, `changeGovernor`, `changeManager`, `setRole`, `grantRole`, `revokeRole`, `setMinter`, `setBurner`, `setOperator`, `setExecutor`, `setUpgrader`, `setPauser`, `transferOwnership`, `renounceOwnership`, `pause`, `unpause`, `upgrade`, `destroy`, `setFee`, `setConfig`, `configure`, `setWhitelist`, `setBlacklist`, and others.
 
 ### Source
 

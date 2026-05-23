@@ -28,7 +28,11 @@ Detects missing message verification in bridge contracts
 
 ### Description
 
-Detects unsafe token minting in bridge contracts
+Detects unsafe token minting in bridge contracts. Checks for unrestricted minting (no access control), missing message validation, and missing mint amount limits.
+
+### Modifier Validation (v2.0.10)
+
+The detector validates that modifiers actually enforce access control by scanning the modifier definition body. Empty modifiers (e.g., `modifier onlyTest() { _; }`) are not trusted. The body must contain at least one of: `require()`, `revert()`, `msg.sender`, `if()`, `assert()`, `_checkRole()`, or `_checkOwner()`. Modifiers not defined in the current file are assumed inherited and trusted to avoid false positives.
 
 ### Source
 

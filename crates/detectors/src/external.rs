@@ -266,9 +266,20 @@ impl UncheckedCallDetector {
     /// Only flags actual low-level call patterns: .call{}, .delegatecall{}, .staticcall{}, .send(), .transfer()
     /// Does NOT flag: array.push(), mapping access, or general method calls
     fn is_external_call(&self, expr: &ast::Expression<'_>) -> bool {
+        // Peel an optional call-options wrapper. The parser represents
+        // `recipient.call{value: x}(args)` as
+        //   FunctionCall(function: FunctionCall(MemberAccess(.call), [x]), args)
+        // (see crates/parser/src/arena.rs FunctionCallBlock handling). Without
+        // this unwrap, the `.call{value:}` form with a discarded return tuple
+        // is never recognized as an external call.
+        let target = match expr {
+            ast::Expression::FunctionCall { function, .. } => *function,
+            _ => expr,
+        };
+
         if let ast::Expression::MemberAccess {
             expression, member, ..
-        } = expr
+        } = target
         {
             // Only flag actual external call patterns - low-level calls
             let method = member.name.to_lowercase();
@@ -343,5 +354,112 @@ impl UncheckedCallDetector {
             ast::Statement::Expression(_) => false, // Bare expression call
             _ => true, // If it's in any other context, assume it's checked
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bumpalo::collections::Vec as BumpVec;
+
+    #[test]
+    fn test_detector_properties() {
+        let detector = UncheckedCallDetector::new();
+        assert_eq!(detector.id().0, "unchecked-external-call");
+        assert_eq!(detector.default_severity(), Severity::Medium);
+        assert!(detector.is_enabled());
+    }
+
+    #[test]
+    fn test_is_external_call_plain_member_access() {
+        let detector = UncheckedCallDetector::new();
+        let arena = ast::AstArena::new();
+
+        let loc = ast::SourceLocation::new("t.sol".into(), ast::Position::start(), ast::Position::start());
+        let addr = arena.alloc(ast::Expression::Identifier(ast::Identifier::new(
+            arena.alloc_str("recipient"),
+            loc.clone(),
+        )));
+        let member = ast::Identifier::new(arena.alloc_str("call"), loc.clone());
+
+        let expr = ast::Expression::MemberAccess {
+            expression: addr,
+            member,
+            location: loc,
+        };
+        assert!(
+            detector.is_external_call(&expr),
+            "plain .call member access should be recognized"
+        );
+    }
+
+    #[test]
+    fn test_is_external_call_with_call_options_wrapper() {
+        let detector = UncheckedCallDetector::new();
+        let arena = ast::AstArena::new();
+
+        let loc = ast::SourceLocation::new("t.sol".into(), ast::Position::start(), ast::Position::start());
+        let addr = arena.alloc(ast::Expression::Identifier(ast::Identifier::new(
+            arena.alloc_str("recipient"),
+            loc.clone(),
+        )));
+        let member = ast::Identifier::new(arena.alloc_str("call"), loc.clone());
+
+        let inner_member_access = ast::Expression::MemberAccess {
+            expression: addr,
+            member,
+            location: loc.clone(),
+        };
+
+        let call_options_wrapper = ast::Expression::FunctionCall {
+            function: arena.alloc(inner_member_access),
+            arguments: BumpVec::new_in(&arena.bump),
+            names: BumpVec::new_in(&arena.bump),
+            location: loc,
+        };
+
+        assert!(
+            detector.is_external_call(&call_options_wrapper),
+            "call-options wrapper should be peeled and recognized"
+        );
+    }
+
+    #[test]
+    fn test_is_not_external_call_for_arrays() {
+        let detector = UncheckedCallDetector::new();
+        let arena = ast::AstArena::new();
+
+        let loc = ast::SourceLocation::new("t.sol".into(), ast::Position::start(), ast::Position::start());
+        let addr = arena.alloc(ast::Expression::Identifier(ast::Identifier::new(
+            arena.alloc_str("shareholders"),
+            loc.clone(),
+        )));
+        let member = ast::Identifier::new(arena.alloc_str("call"), loc.clone());
+
+        let expr = ast::Expression::MemberAccess {
+            expression: addr,
+            member,
+            location: loc,
+        };
+        assert!(
+            !detector.is_external_call(&expr),
+            "array-like names should not be flagged"
+        );
+    }
+
+    #[test]
+    fn test_has_inline_success_check() {
+        let detector = UncheckedCallDetector::new();
+
+        let checked = r#"
+            (bool success, ) = addr.call{value: amount}("");
+            require(success, "Transfer failed");
+        "#;
+        assert!(detector.has_inline_success_check(checked));
+
+        let unchecked = r#"
+            addr.call{value: amount}("");
+        "#;
+        assert!(!detector.has_inline_success_check(unchecked));
     }
 }
