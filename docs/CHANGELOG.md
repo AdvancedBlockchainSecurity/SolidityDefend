@@ -5,6 +5,42 @@ All notable changes to SolidityDefend will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v2.0.10 (2026-05-23)
+
+### Fixed
+
+#### Recall Regression Fixes — 6 Bugs, 149/149 Ground Truth (100%)
+
+FP-reduction commits in v2.0.3–v2.0.8 introduced over-aggressive skip logic that silently dropped true positives. Discovered via Apogee platform scan `4deeea4a` on seeded `VulnerableVault_2` fixture (4 expected findings, only 1 reported). Root-cause analysis found 6 bugs across parser, IR, and 4 detectors.
+
+**Parser (root cause)**:
+- **Compound assignment parsing** (`+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `|=`, `^=`, `<<=`, `>>=`) — all 10 variants fell into `_ => Literal("0")` catch-all in `arena.rs`, erasing state-change semantics for every detector that walks `Expression::Assignment`
+
+**Detector fixes**:
+- **`classic-reentrancy`** (Bug 1) — `is_pull_payment_pattern` matched `withdraw`/`claim`/`redeem` + `balances[msg.sender]`, which is the canonical CEI-violation pattern, not a pull payment. Tightened to only match dedicated per-user credit ledgers (`pending`, `unclaimed`, `claimable`, `owed[`, `escrow[`) and OpenZeppelin `PullPayment`/`_asyncTransfer`/`withdrawPayments`
+- **`missing-access-modifiers`** (Bug 2) — 18 ownership-change verbs missing from `admin_only_patterns`: `changeOwner`, `updateOwner`, `swapOwner`, `replaceOwner`, `newOwner`, `changeAdmin`, `updateAdmin`, `changeGovernor`, `changeManager`, `setRole`, `grantRole`, `revokeRole`, `setMinter`, `setBurner`, `setOperator`, `setExecutor`, `setUpgrader`, `setPauser`
+- **`unchecked-external-call`** (Bug 3) — `is_external_call` did not peel the `FunctionCall(FunctionCall(MemberAccess(.call), [options]), [args])` wrapper that the parser generates for `.call{value: x}("")`, so `.call{value:}` with a discarded return tuple was never recognized
+- **`delegatecall-return-ignored`** (Bug 5) — `has_unvalidated_delegatecall` treated `return success` as validation ("caller handles it"), but returning an unchecked value is not validation. Removed the `return success`/`return result` early-skip
+- **`bridge-token-mint-control`** (Bug 6) — modifier presence (`!function.modifiers.is_empty()`) was trusted unconditionally. Added `modifier_body_has_access_control()` that scans the modifier definition body for actual auth logic; empty modifiers (`modifier onlyX() { _; }`) no longer count as access control
+
+**IR fix**:
+- **`lowering.rs`** — `lower_expression` for `Expression::FunctionCall` did not peel the call-options wrapper before matching, so `.call{value:}` patterns were not resolved to external calls in the dataflow path
+
+### Added
+
+- **22 regression tests** covering all 6 fix areas: compound assignment parsing, pull-payment over-skip, ownership-change verbs, call-options wrapper, captured-but-not-validated delegatecall, empty modifier detection
+- **`vulnerable_vault_2.sol`** test fixture with 5 seeded vulnerabilities for recall regression testing
+
+### Validation
+
+- Ground truth recall: **149/149 (100%)** — was 147/149 in v2.0.9
+- VulnerableVault_2 fixture: **4/4 findings** (reentrancy, 2x access control, unchecked call)
+- External corpus (`vulnerable-smart-contract-examples/`, 63 contracts): **222 findings, 0 parse errors**
+- Cargo tests: **444 passed, 0 failed**
+- No regressions on clean/benchmark contracts
+
+---
+
 ## v2.0.9 (2026-02-28)
 
 ### Changed

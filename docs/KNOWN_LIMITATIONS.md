@@ -1,7 +1,7 @@
 # Known Limitations
 
-**Version:** v2.0.2
-**Last Updated:** 2026-02-16
+**Version:** v2.0.10
+**Last Updated:** 2026-05-23
 
 This document outlines known limitations and gaps in SolidityDefend's vulnerability detection capabilities based on comprehensive validation testing.
 
@@ -9,7 +9,13 @@ This document outlines known limitations and gaps in SolidityDefend's vulnerabil
 
 ## Overview
 
-SolidityDefend v2.0.2 has **81 precision-tuned security detectors** (67 security + 5 oracle + 4 L2 + 5 lint), all enabled by default (lint detectors require `--lint` flag). The tool includes an intra-procedural dataflow analysis pipeline (IR lowering, CFG, reaching definitions, live variables, def-use chains, taint analysis) wired into the detector framework. It is validated against a **122-contract ground truth suite** with **103 expected true positives** across 30+ vulnerability categories. Current recall is **100%** (0 false negatives).
+SolidityDefend v2.0.10 has **81 precision-tuned security detectors** (67 security + 5 oracle + 4 L2 + 5 lint), all enabled by default (lint detectors require `--lint` flag). The tool includes an intra-procedural dataflow analysis pipeline (IR lowering, CFG, reaching definitions, live variables, def-use chains, taint analysis) wired into the detector framework. It is validated against a **122-contract ground truth suite** with **149 expected true positives** across 30+ vulnerability categories. Current recall is **100%** (0 false negatives).
+
+**v2.0.10 Improvements:** Recall regression fixes (May 23, 2026):
+- **6 bugs fixed** across parser (compound assignments), IR (call-options wrapper), and 4 detectors (reentrancy, access control, external calls, delegatecall, bridge minting)
+- **22 regression tests added** covering all fix areas
+- **Ground truth recall: 149/149 (100%)** — was 147/149 in v2.0.9
+- 0 true positive regressions, 0 new false positives
 
 **v2.0.2 Improvements:** FP Reduction Phase 2 — targeted sweep of 6 highest-FP detectors (Feb 16, 2026):
 - **22 FPs eliminated** from vault-share-inflation, flash-loan-collateral-swap, vault-fee-manipulation, mev-priority-gas-auction, lrt-share-inflation, metamorphic-contract-risk

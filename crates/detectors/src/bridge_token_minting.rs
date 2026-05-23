@@ -57,7 +57,12 @@ impl TokenMintingDetector {
         let func_source = self.get_function_source(function, ctx).to_lowercase();
 
         // Check for access control modifiers (now that AST parser populates them!)
-        let has_modifier = !function.modifiers.is_empty();
+        // A modifier only counts if its body actually enforces access — an empty
+        // modifier (`modifier onlyX() { _; }`) provides zero protection.
+        let has_modifier = function
+            .modifiers
+            .iter()
+            .any(|inv| self.modifier_enforces_access(&inv.name.name, ctx));
 
         // Also check for inline require statements as additional validation
         let has_inline_check = func_source.contains("require(msg.sender");
@@ -112,6 +117,16 @@ impl TokenMintingDetector {
         issues
     }
 
+    /// Check whether a modifier with the given name actually enforces access control.
+    /// An empty modifier (only `_;`) provides zero protection regardless of name.
+    /// The parser does not currently populate `ContractPart::ModifierDefinition` (see
+    /// crates/parser/src/arena.rs:154), so this scans the raw source text for the
+    /// modifier definition body. Returns true when the definition is not found in
+    /// this file (likely inherited from a base contract) to avoid false positives.
+    fn modifier_enforces_access(&self, name: &str, ctx: &AnalysisContext) -> bool {
+        modifier_body_has_access_control(name, &ctx.source_code)
+    }
+
     /// Get function source code with comments stripped to avoid false positives
     fn get_function_source(&self, function: &ast::Function<'_>, ctx: &AnalysisContext) -> String {
         let start = function.location.start().line();
@@ -135,6 +150,64 @@ impl TokenMintingDetector {
             .collect::<Vec<&str>>()
             .join("\n")
     }
+}
+
+/// Check whether a modifier definition in `src` actually enforces access control.
+/// Returns true when the definition is not found (assume inherited/safe) or when
+/// the body contains auth-related patterns.
+fn modifier_body_has_access_control(name: &str, src: &str) -> bool {
+    let needle = format!("modifier {}", name);
+    let Some(start) = src.find(&needle) else {
+        return true;
+    };
+
+    let after_name = &src[start + needle.len()..];
+    let Some(brace_offset) = after_name.find('{') else {
+        return true;
+    };
+    let body_start = start + needle.len() + brace_offset + 1;
+
+    let bytes = src.as_bytes();
+    let mut depth = 1usize;
+    let mut idx = body_start;
+    while idx < bytes.len() && depth > 0 {
+        match bytes[idx] {
+            b'{' => depth += 1,
+            b'}' => depth -= 1,
+            _ => {}
+        }
+        if depth == 0 {
+            break;
+        }
+        idx += 1;
+    }
+    if depth != 0 {
+        return true;
+    }
+    let body = &src[body_start..idx];
+
+    let stripped: String = body
+        .lines()
+        .map(|line| {
+            if let Some(pos) = line.find("//") {
+                &line[..pos]
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<&str>>()
+        .join("\n")
+        .to_lowercase();
+
+    stripped.contains("require(")
+        || stripped.contains("revert(")
+        || stripped.contains("revert ")
+        || stripped.contains("msg.sender")
+        || stripped.contains("if (")
+        || stripped.contains("if(")
+        || stripped.contains("assert(")
+        || stripped.contains("_checkrole")
+        || stripped.contains("_checkowner")
 }
 
 impl Default for TokenMintingDetector {
@@ -231,6 +304,90 @@ mod tests {
             detector
                 .categories()
                 .contains(&DetectorCategory::AccessControl)
+        );
+    }
+
+    #[test]
+    fn test_empty_modifier_not_trusted() {
+        let src = r#"
+contract Bridge {
+    modifier onlyTest() {
+        _;
+    }
+    function mint(uint256 amount) external onlyTest {}
+}
+"#;
+        assert!(
+            !modifier_body_has_access_control("onlyTest", src),
+            "empty modifier (only _;) should not count as access control"
+        );
+    }
+
+    #[test]
+    fn test_modifier_with_require_is_trusted() {
+        let src = r#"
+contract Bridge {
+    modifier onlyBridge() {
+        require(msg.sender == bridge, "Not bridge");
+        _;
+    }
+    function mint(uint256 amount) external onlyBridge {}
+}
+"#;
+        assert!(
+            modifier_body_has_access_control("onlyBridge", src),
+            "modifier with require(msg.sender) should be trusted"
+        );
+    }
+
+    #[test]
+    fn test_modifier_with_if_revert_is_trusted() {
+        let src = r#"
+contract Bridge {
+    modifier onlyAdmin() {
+        if (msg.sender != admin) revert Unauthorized();
+        _;
+    }
+}
+"#;
+        assert!(modifier_body_has_access_control("onlyAdmin", src));
+    }
+
+    #[test]
+    fn test_modifier_with_oz_checkrole_is_trusted() {
+        let src = r#"
+contract Bridge {
+    modifier onlyMinter() {
+        _checkRole(MINTER_ROLE);
+        _;
+    }
+}
+"#;
+        assert!(modifier_body_has_access_control("onlyMinter", src));
+    }
+
+    #[test]
+    fn test_modifier_not_found_assumed_inherited() {
+        let src = "contract Bridge { function mint() external onlyOwner {} }";
+        assert!(
+            modifier_body_has_access_control("onlyOwner", src),
+            "modifier not defined locally should be assumed inherited (safe)"
+        );
+    }
+
+    #[test]
+    fn test_modifier_with_commented_require_not_trusted() {
+        let src = r#"
+contract Bridge {
+    modifier onlyFake() {
+        // require(msg.sender == owner);
+        _;
+    }
+}
+"#;
+        assert!(
+            !modifier_body_has_access_control("onlyFake", src),
+            "commented-out require should not count"
         );
     }
 }

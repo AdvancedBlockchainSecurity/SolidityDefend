@@ -831,15 +831,30 @@ impl Lowering {
                     arg_values.push(self.lower_expression(context, arg)?);
                 }
 
+                // Peel call-option wrapper: `addr.call{value: x}(args)` parses as
+                // FunctionCall(function: FunctionCall(MemberAccess), args), so the
+                // outer FunctionCall's `function` is an inner FunctionCall whose
+                // own `function` is the MemberAccess we care about. Without this
+                // peel, low-level `.call{...}()` patterns silently fail to lower
+                // to an ExternalCall instruction, and dataflow-based detectors
+                // (e.g. classic-reentrancy) miss the canonical CEI-violation case.
+                let resolved_target = match function {
+                    Expression::FunctionCall {
+                        function: inner_function,
+                        ..
+                    } => *inner_function,
+                    _ => *function,
+                };
+
                 // Determine function name and type
-                let (func_name, _is_external) = match function {
+                let (func_name, _is_external) = match resolved_target {
                     Expression::Identifier(id) => (id.name.to_string(), false),
                     Expression::MemberAccess {
                         expression, member, ..
                     } => {
                         // External call: contract.function()
                         let contract_val = self.lower_expression(context, expression)?;
-                        let result_type = self.infer_function_call_type(function)?;
+                        let result_type = self.infer_function_call_type(resolved_target)?;
                         let result_value = context.create_value(result_type);
 
                         context.add_instruction(Instruction::ExternalCall(

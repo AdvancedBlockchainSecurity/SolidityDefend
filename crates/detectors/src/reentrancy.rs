@@ -593,24 +593,31 @@ impl ClassicReentrancyDetector {
     }
 
     /// Phase 15 FP Reduction: Check if this is a pull payment pattern
-    /// Pull payments have users claim their own funds (safe pattern)
+    /// Pull payments have users claim their own funds (safe pattern).
+    ///
+    /// A true pull-payment uses a dedicated per-user credit ledger
+    /// (pendingWithdrawals[user], pendingRewards[user], unclaimed[user]) — NOT
+    /// the contract's general `balances` mapping that also receives deposits.
+    /// The latter is the canonical classic-reentrancy pattern (deposit then
+    /// withdraw via external call before debit), so matching on
+    /// `withdraw`/`claim`/`redeem` + `balances[msg.sender]` silently skipped
+    /// the very vulnerability this detector exists to catch.
     fn is_pull_payment_pattern(&self, func_source: &str) -> bool {
         let lower = func_source.to_lowercase();
 
-        // Pull payment patterns
-        let has_pull_keywords =
-            lower.contains("claim") || lower.contains("withdraw") || lower.contains("redeem");
+        // Per-user credit ledger naming (the defining marker of a pull-payment)
+        let has_pull_ledger = lower.contains("pending")
+            || lower.contains("unclaimed")
+            || lower.contains("claimable")
+            || lower.contains("owed[")
+            || lower.contains("escrow[");
 
-        // Check if it accesses msg.sender's balance (user withdrawing their own funds)
-        let accesses_sender_balance = lower.contains("[msg.sender]")
-            && (lower.contains("balance") || lower.contains("amount") || lower.contains("pending"));
-
-        // PullPayment from OpenZeppelin
+        // OpenZeppelin PullPayment / Escrow
         let uses_oz_pull = func_source.contains("PullPayment")
             || func_source.contains("_asyncTransfer")
             || func_source.contains("withdrawPayments");
 
-        has_pull_keywords && (accesses_sender_balance || uses_oz_pull)
+        has_pull_ledger || uses_oz_pull
     }
 
     /// Phase 14 FP Reduction: Check if contract has contract-wide reentrancy protection
@@ -1246,5 +1253,83 @@ impl Detector for ReadOnlyReentrancyDetector {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_detector_properties() {
+        let detector = ClassicReentrancyDetector::new();
+        assert_eq!(detector.id().0, "classic-reentrancy");
+        assert_eq!(detector.default_severity(), Severity::High);
+        assert!(detector.is_enabled());
+    }
+
+    #[test]
+    fn test_pull_payment_with_pending_is_skipped() {
+        let detector = ClassicReentrancyDetector::new();
+
+        let src = r#"
+            function claimReward() external {
+                uint256 amount = pendingRewards[msg.sender];
+                pendingRewards[msg.sender] = 0;
+                (bool ok, ) = msg.sender.call{value: amount}("");
+                require(ok);
+            }
+        "#;
+        assert!(
+            detector.is_pull_payment_pattern(src),
+            "pull-payment with pendingRewards should be skipped"
+        );
+    }
+
+    #[test]
+    fn test_classic_withdraw_not_skipped_as_pull_payment() {
+        let detector = ClassicReentrancyDetector::new();
+
+        let src = r#"
+            function withdraw(uint256 amount) public {
+                require(balances[msg.sender] >= amount, "Insufficient balance");
+                (bool success, ) = msg.sender.call{value: amount}("");
+                require(success, "Transfer failed");
+                balances[msg.sender] -= amount;
+            }
+        "#;
+        assert!(
+            !detector.is_pull_payment_pattern(src),
+            "classic CEI-violation withdraw must NOT be skipped"
+        );
+    }
+
+    #[test]
+    fn test_oz_pull_payment_is_skipped() {
+        let detector = ClassicReentrancyDetector::new();
+
+        let src = r#"
+            function withdrawPayments(address payable payee) public {
+                _asyncTransfer(payee, payments[payee]);
+            }
+        "#;
+        assert!(
+            detector.is_pull_payment_pattern(src),
+            "OpenZeppelin PullPayment pattern should be skipped"
+        );
+    }
+
+    #[test]
+    fn test_escrow_pattern_is_skipped() {
+        let detector = ClassicReentrancyDetector::new();
+
+        let src = r#"
+            function claimEscrow() external {
+                uint256 amount = escrow[msg.sender];
+                escrow[msg.sender] = 0;
+                payable(msg.sender).transfer(amount);
+            }
+        "#;
+        assert!(detector.is_pull_payment_pattern(src));
     }
 }

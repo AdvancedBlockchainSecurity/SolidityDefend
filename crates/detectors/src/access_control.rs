@@ -403,6 +403,26 @@ impl MissingModifiersDetector {
             "disable",
             "setwhitelist",
             "setblacklist",
+            // Recall fix 2026-05-22: ownership-change verbs missed by the
+            // `setowner`/`renounceownership`/`transferownership` substrings.
+            "changeowner",
+            "updateowner",
+            "swapowner",
+            "replaceowner",
+            "newowner",
+            "changeadmin",
+            "updateadmin",
+            "changegovernor",
+            "changemanager",
+            "setrole",
+            "grantrole",
+            "revokerole",
+            "setminter",
+            "setburner",
+            "setoperator",
+            "setexecutor",
+            "setupgrader",
+            "setpauser",
         ];
 
         // These patterns are admin-only when they're the FULL name (not part of a user function)
@@ -1707,6 +1727,27 @@ mod tests {
         assert!(detector.requires_access_control("destroy"));
         assert!(detector.requires_access_control("transferOwnership"));
         assert!(detector.requires_access_control("renounceOwnership"));
+    }
+
+    #[test]
+    fn test_requires_access_control_ownership_change_verbs() {
+        let detector = MissingModifiersDetector::new();
+
+        assert!(detector.requires_access_control("changeOwner"));
+        assert!(detector.requires_access_control("updateOwner"));
+        assert!(detector.requires_access_control("swapOwner"));
+        assert!(detector.requires_access_control("replaceOwner"));
+        assert!(detector.requires_access_control("newOwner"));
+        assert!(detector.requires_access_control("changeAdmin"));
+        assert!(detector.requires_access_control("updateAdmin"));
+        assert!(detector.requires_access_control("changeGovernor"));
+        assert!(detector.requires_access_control("changeManager"));
+        assert!(detector.requires_access_control("setRole"));
+        assert!(detector.requires_access_control("grantRole"));
+        assert!(detector.requires_access_control("revokeRole"));
+        assert!(detector.requires_access_control("setMinter"));
+        assert!(detector.requires_access_control("setOperator"));
+        assert!(detector.requires_access_control("setPauser"));
     }
 
     /// Test that requires_access_control does NOT flag user-facing functions

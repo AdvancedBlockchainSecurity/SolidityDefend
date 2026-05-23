@@ -12,7 +12,15 @@
 
 ### Description
 
-State changes after external calls enable reentrancy attacks
+State changes after external calls enable reentrancy attacks (CEI violation).
+
+### FP Reduction: Pull Payment Skip
+
+The detector skips functions that match the **pull payment** pattern, where users claim from a dedicated per-user credit ledger. A function is skipped only when its source contains:
+- Ledger keywords: `pending`, `unclaimed`, `claimable`, `owed[`, `escrow[`
+- OpenZeppelin helpers: `PullPayment`, `_asyncTransfer`, `withdrawPayments`
+
+Classic `withdraw()` using `balances[msg.sender]` is **not** skipped — that mapping receives deposits and is the canonical CEI-violation target.
 
 ### Source
 
