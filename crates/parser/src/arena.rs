@@ -947,8 +947,12 @@ impl<'arena> ArenaParser<'arena> {
             // any function that uses `+=`, `-=`, etc. — including the canonical
             // CEI-violation pattern `balances[msg.sender] -= amount;`.
             pt::Expression::AssignAdd(_, left, right) => {
-                let left_expr = self.arena.alloc(self.convert_expression(left, source, file_path)?);
-                let right_expr = self.arena.alloc(self.convert_expression(right, source, file_path)?);
+                let left_expr = self
+                    .arena
+                    .alloc(self.convert_expression(left, source, file_path)?);
+                let right_expr = self
+                    .arena
+                    .alloc(self.convert_expression(right, source, file_path)?);
                 Ok(Expression::Assignment {
                     left: left_expr,
                     operator: AssignmentOperator::AddAssign,
@@ -957,8 +961,12 @@ impl<'arena> ArenaParser<'arena> {
                 })
             }
             pt::Expression::AssignSubtract(_, left, right) => {
-                let left_expr = self.arena.alloc(self.convert_expression(left, source, file_path)?);
-                let right_expr = self.arena.alloc(self.convert_expression(right, source, file_path)?);
+                let left_expr = self
+                    .arena
+                    .alloc(self.convert_expression(left, source, file_path)?);
+                let right_expr = self
+                    .arena
+                    .alloc(self.convert_expression(right, source, file_path)?);
                 Ok(Expression::Assignment {
                     left: left_expr,
                     operator: AssignmentOperator::SubAssign,
@@ -967,8 +975,12 @@ impl<'arena> ArenaParser<'arena> {
                 })
             }
             pt::Expression::AssignMultiply(_, left, right) => {
-                let left_expr = self.arena.alloc(self.convert_expression(left, source, file_path)?);
-                let right_expr = self.arena.alloc(self.convert_expression(right, source, file_path)?);
+                let left_expr = self
+                    .arena
+                    .alloc(self.convert_expression(left, source, file_path)?);
+                let right_expr = self
+                    .arena
+                    .alloc(self.convert_expression(right, source, file_path)?);
                 Ok(Expression::Assignment {
                     left: left_expr,
                     operator: AssignmentOperator::MulAssign,
@@ -977,8 +989,12 @@ impl<'arena> ArenaParser<'arena> {
                 })
             }
             pt::Expression::AssignDivide(_, left, right) => {
-                let left_expr = self.arena.alloc(self.convert_expression(left, source, file_path)?);
-                let right_expr = self.arena.alloc(self.convert_expression(right, source, file_path)?);
+                let left_expr = self
+                    .arena
+                    .alloc(self.convert_expression(left, source, file_path)?);
+                let right_expr = self
+                    .arena
+                    .alloc(self.convert_expression(right, source, file_path)?);
                 Ok(Expression::Assignment {
                     left: left_expr,
                     operator: AssignmentOperator::DivAssign,
@@ -987,8 +1003,12 @@ impl<'arena> ArenaParser<'arena> {
                 })
             }
             pt::Expression::AssignModulo(_, left, right) => {
-                let left_expr = self.arena.alloc(self.convert_expression(left, source, file_path)?);
-                let right_expr = self.arena.alloc(self.convert_expression(right, source, file_path)?);
+                let left_expr = self
+                    .arena
+                    .alloc(self.convert_expression(left, source, file_path)?);
+                let right_expr = self
+                    .arena
+                    .alloc(self.convert_expression(right, source, file_path)?);
                 Ok(Expression::Assignment {
                     left: left_expr,
                     operator: AssignmentOperator::ModAssign,
@@ -997,8 +1017,12 @@ impl<'arena> ArenaParser<'arena> {
                 })
             }
             pt::Expression::AssignAnd(_, left, right) => {
-                let left_expr = self.arena.alloc(self.convert_expression(left, source, file_path)?);
-                let right_expr = self.arena.alloc(self.convert_expression(right, source, file_path)?);
+                let left_expr = self
+                    .arena
+                    .alloc(self.convert_expression(left, source, file_path)?);
+                let right_expr = self
+                    .arena
+                    .alloc(self.convert_expression(right, source, file_path)?);
                 Ok(Expression::Assignment {
                     left: left_expr,
                     operator: AssignmentOperator::AndAssign,
@@ -1007,8 +1031,12 @@ impl<'arena> ArenaParser<'arena> {
                 })
             }
             pt::Expression::AssignOr(_, left, right) => {
-                let left_expr = self.arena.alloc(self.convert_expression(left, source, file_path)?);
-                let right_expr = self.arena.alloc(self.convert_expression(right, source, file_path)?);
+                let left_expr = self
+                    .arena
+                    .alloc(self.convert_expression(left, source, file_path)?);
+                let right_expr = self
+                    .arena
+                    .alloc(self.convert_expression(right, source, file_path)?);
                 Ok(Expression::Assignment {
                     left: left_expr,
                     operator: AssignmentOperator::OrAssign,
@@ -1017,8 +1045,12 @@ impl<'arena> ArenaParser<'arena> {
                 })
             }
             pt::Expression::AssignXor(_, left, right) => {
-                let left_expr = self.arena.alloc(self.convert_expression(left, source, file_path)?);
-                let right_expr = self.arena.alloc(self.convert_expression(right, source, file_path)?);
+                let left_expr = self
+                    .arena
+                    .alloc(self.convert_expression(left, source, file_path)?);
+                let right_expr = self
+                    .arena
+                    .alloc(self.convert_expression(right, source, file_path)?);
                 Ok(Expression::Assignment {
                     left: left_expr,
                     operator: AssignmentOperator::XorAssign,
@@ -1027,8 +1059,12 @@ impl<'arena> ArenaParser<'arena> {
                 })
             }
             pt::Expression::AssignShiftLeft(_, left, right) => {
-                let left_expr = self.arena.alloc(self.convert_expression(left, source, file_path)?);
-                let right_expr = self.arena.alloc(self.convert_expression(right, source, file_path)?);
+                let left_expr = self
+                    .arena
+                    .alloc(self.convert_expression(left, source, file_path)?);
+                let right_expr = self
+                    .arena
+                    .alloc(self.convert_expression(right, source, file_path)?);
                 Ok(Expression::Assignment {
                     left: left_expr,
                     operator: AssignmentOperator::ShiftLeftAssign,
@@ -1037,8 +1073,12 @@ impl<'arena> ArenaParser<'arena> {
                 })
             }
             pt::Expression::AssignShiftRight(_, left, right) => {
-                let left_expr = self.arena.alloc(self.convert_expression(left, source, file_path)?);
-                let right_expr = self.arena.alloc(self.convert_expression(right, source, file_path)?);
+                let left_expr = self
+                    .arena
+                    .alloc(self.convert_expression(left, source, file_path)?);
+                let right_expr = self
+                    .arena
+                    .alloc(self.convert_expression(right, source, file_path)?);
                 Ok(Expression::Assignment {
                     left: left_expr,
                     operator: AssignmentOperator::ShiftRightAssign,

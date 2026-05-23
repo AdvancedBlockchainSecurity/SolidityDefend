@@ -375,7 +375,11 @@ mod tests {
         let detector = UncheckedCallDetector::new();
         let arena = ast::AstArena::new();
 
-        let loc = ast::SourceLocation::new("t.sol".into(), ast::Position::start(), ast::Position::start());
+        let loc = ast::SourceLocation::new(
+            "t.sol".into(),
+            ast::Position::start(),
+            ast::Position::start(),
+        );
         let addr = arena.alloc(ast::Expression::Identifier(ast::Identifier::new(
             arena.alloc_str("recipient"),
             loc.clone(),
@@ -398,7 +402,11 @@ mod tests {
         let detector = UncheckedCallDetector::new();
         let arena = ast::AstArena::new();
 
-        let loc = ast::SourceLocation::new("t.sol".into(), ast::Position::start(), ast::Position::start());
+        let loc = ast::SourceLocation::new(
+            "t.sol".into(),
+            ast::Position::start(),
+            ast::Position::start(),
+        );
         let addr = arena.alloc(ast::Expression::Identifier(ast::Identifier::new(
             arena.alloc_str("recipient"),
             loc.clone(),
@@ -429,7 +437,11 @@ mod tests {
         let detector = UncheckedCallDetector::new();
         let arena = ast::AstArena::new();
 
-        let loc = ast::SourceLocation::new("t.sol".into(), ast::Position::start(), ast::Position::start());
+        let loc = ast::SourceLocation::new(
+            "t.sol".into(),
+            ast::Position::start(),
+            ast::Position::start(),
+        );
         let addr = arena.alloc(ast::Expression::Identifier(ast::Identifier::new(
             arena.alloc_str("shareholders"),
             loc.clone(),
