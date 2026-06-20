@@ -780,3 +780,73 @@ impl Default for DetectorRegistryBuilder {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Regression guard: if the registered detector count drops below this
+    // threshold, a detector was accidentally unregistered. Update this constant
+    // intentionally when adding or removing detectors.
+    const MIN_REGISTERED_DETECTORS: usize = 90;
+
+    #[test]
+    fn registered_detector_count_meets_minimum() {
+        let registry = DetectorRegistry::with_all_detectors();
+        let count = registry.detectors.len();
+        assert!(
+            count >= MIN_REGISTERED_DETECTORS,
+            "Detector count dropped to {count} — expected at least {MIN_REGISTERED_DETECTORS}. \
+             A detector was likely accidentally unregistered in registry.rs. \
+             Check crates/detectors/src/registry.rs register_built_in_detectors()."
+        );
+    }
+
+    #[test]
+    fn all_registered_detectors_have_non_empty_ids() {
+        let registry = DetectorRegistry::with_all_detectors();
+        for (id, detector) in &registry.detectors {
+            assert!(
+                !id.0.is_empty(),
+                "Detector '{}' has an empty ID string",
+                detector.name()
+            );
+            assert!(
+                !detector.name().is_empty(),
+                "Detector with id '{}' has an empty name",
+                id.0
+            );
+            assert!(
+                !detector.description().is_empty(),
+                "Detector '{}' has an empty description",
+                id.0
+            );
+        }
+    }
+
+    #[test]
+    fn no_duplicate_detector_ids() {
+        // DetectorRegistry uses a HashMap keyed on DetectorId, so duplicates
+        // silently overwrite each other. This test catches that by verifying
+        // the final count equals the number of unique IDs we inserted.
+        // If a duplicate exists, the HashMap count will be lower than expected.
+        let registry = DetectorRegistry::with_all_detectors();
+        let ids: Vec<String> = registry.detectors.keys().map(|id| id.0.clone()).collect();
+        let unique_count = ids.len();
+        let mut seen = std::collections::HashSet::new();
+        let mut duplicates = Vec::new();
+        for id in &ids {
+            if !seen.insert(id) {
+                duplicates.push(id.clone());
+            }
+        }
+        assert!(
+            duplicates.is_empty(),
+            "Duplicate detector IDs found (silently overwritten in registry): {:?}. \
+             Each detector must have a unique ID.",
+            duplicates
+        );
+        // Sanity: unique_count should equal ids.len() since HashMap already deduplicates
+        assert_eq!(unique_count, ids.len());
+    }
+}

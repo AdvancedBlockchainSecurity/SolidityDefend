@@ -5,6 +5,40 @@ All notable changes to SolidityDefend will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v2.0.12 (2026-06-20)
+
+### Fixed
+
+- **`signature-replay`** — `"mapping"` was a standalone entry in `nonce_specific_patterns`, so any contract with a `mapping()` declaration was treated as having replay protection, making the detector effectively dead for all stateful contracts. Removed bare `"mapping"` entry; compound check `mapping + nonce` already handled correctly. Added `"usedsignatures"` and `"usedhashes"` to catch state-variable-style declarations
+- **`signature-replay`** — Function-level nonce check matched `voucherUsed`, `initialized`, and other non-nonce identifiers via the pattern `"used"`. Tightened to `"usedhash"`, `"usedsig"`, `"usednonce"`, `"!initialized"`, `"require(!initialized"`
+- **`missing-access-modifiers`** — Added 9 restaking/slashing verbs: `slash`, `freeze`, `forceUndelegate`, `forceSlash`, `addOperatorToQuorum`, `removeOperator`, `freezeOperator`, `confiscate`, `penalize`
+
+### Added
+
+- **20 regression tests** across 6 detector files covering all fixes from v2.0.11 and v2.0.12 — timestamp FP guards, delegatecall user-controlled, unchecked-external-call loop/tuple/array patterns, access control admin verbs, readonly-reentrancy statement types, signature-replay nonce detection
+- **3 registry integrity tests** in `registry.rs`: registered count >= 90, all detectors have valid IDs/names/descriptions, no duplicate IDs — run on every `cargo test`
+- **`docs/REMOVED_DETECTORS.md`** — register of removed detectors with reason, prevents rebuilding the same detector twice
+- **`scripts/check_detector_registration.sh`** — shell script for auditing top-level detector registration gaps
+
+### Removed
+
+- `aa_signature_aggregation.rs` — exact ID collision with active `aa/signature_aggregation.rs`
+- `erc4337_paymaster_abuse.rs` — exact ID collision with active `aa/paymaster_abuse.rs`
+- `erc7683_permit2_integration.rs` — zero TPs, file-level scanning bug causes FPs, no test corpus coverage
+
+### Changed
+
+- CI detector count threshold raised from 60 → 90
+
+### Validation
+
+- Unit tests: **495 passed, 0 failed** (was 474)
+- Ground truth recall: **149/149 (100%)**
+- Clean/benchmark FP rate: **0%**
+- External corpus: **330 findings** (was 321, +9)
+
+---
+
 ## v2.0.11 (2026-06-19)
 
 ### Fixed

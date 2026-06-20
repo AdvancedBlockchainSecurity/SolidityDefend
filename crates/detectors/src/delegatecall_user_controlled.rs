@@ -364,6 +364,35 @@ impl DelegatecallUserControlledDetector {
 mod tests {
     use super::*;
 
+    /// Parse `source` with the real Solidity parser and run `detector.detect`
+    /// against the first contract. Populates the AST so the detector sees the
+    /// function bodies and parameters (unlike `create_test_context`).
+    fn detect_findings(
+        detector: &DelegatecallUserControlledDetector,
+        source: &str,
+    ) -> Vec<Finding> {
+        use ast::arena::AstArena;
+        use parser::Parser;
+        use semantic::SymbolTable;
+
+        let arena = Box::leak(Box::new(AstArena::new()));
+        let parser = Parser::new();
+        let source_file = parser
+            .parse(arena, source, "test.sol")
+            .expect("source should parse");
+        let contract = source_file
+            .contracts
+            .first()
+            .expect("source should contain a contract");
+        let ctx = AnalysisContext::new(
+            contract,
+            SymbolTable::new(),
+            source.to_string(),
+            "test.sol".to_string(),
+        );
+        detector.detect(&ctx).expect("detect should succeed")
+    }
+
     #[test]
     fn test_detector_properties() {
         let detector = DelegatecallUserControlledDetector::new();
@@ -371,5 +400,54 @@ mod tests {
         assert_eq!(detector.default_severity(), Severity::Critical);
         assert!(detector.is_enabled());
         assert_eq!(detector.id().0, "delegatecall-user-controlled");
+    }
+
+    /// Regression: this detector was previously unregistered (dead code).
+    /// Verify it fires on a function whose delegatecall target is a
+    /// user-controlled address parameter.
+    #[test]
+    fn test_user_controlled_delegatecall_target_fires() {
+        let detector = DelegatecallUserControlledDetector::new();
+        let source = r#"
+            contract Proxy {
+                function forward(address target, bytes calldata data) external {
+                    (bool ok, ) = target.delegatecall(data);
+                    require(ok, "delegatecall failed");
+                }
+            }
+        "#;
+        let findings = detect_findings(&detector, source);
+        assert!(
+            !findings.is_empty(),
+            "delegatecall with user-controlled target parameter should fire"
+        );
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.detector_id.0 == "delegatecall-user-controlled"),
+            "all findings should come from delegatecall-user-controlled"
+        );
+    }
+
+    /// FP guard: a delegatecall whose target is gated by an inline owner check
+    /// (require(msg.sender == owner)) must NOT fire.
+    #[test]
+    fn test_owner_checked_delegatecall_does_not_fire() {
+        let detector = DelegatecallUserControlledDetector::new();
+        let source = r#"
+            contract OwnedProxy {
+                address public owner;
+                function forward(address target, bytes calldata data) external {
+                    require(msg.sender == owner, "not owner");
+                    (bool ok, ) = target.delegatecall(data);
+                    require(ok, "delegatecall failed");
+                }
+            }
+        "#;
+        let findings = detect_findings(&detector, source);
+        assert!(
+            findings.is_empty(),
+            "owner-checked delegatecall should not fire"
+        );
     }
 }

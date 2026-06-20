@@ -24,6 +24,7 @@ See `tests/validation/ground_truth.json` (v1.4.0, updated 2026-02-16) for the co
 |---------|-----------------|
 | v2.0.10 | 81 |
 | v2.0.11 | 90 |
+| v2.0.12 | 90 |
 
 ## Test Targets (18 directories)
 
@@ -165,3 +166,4 @@ See individual baseline files:
 | v2.0.7 | v21 | 2 domain-filtered | 4 | — | 0 | 103/103 |
 | v2.0.8 | v22 | 46 GT reclassified | 46 | — | 0 | 149/149 |
 | v2.0.11 | v23 | 8 registered, 6 fixed, 1 FP filter | +174 TPs | 368 (ext.) | 0 | 149/149 |
+| v2.0.12 | v24 | 3 deleted, 2 detector fixes, 20 tests | +9 TPs | 330 (ext.) | 0 | 149/149 |
