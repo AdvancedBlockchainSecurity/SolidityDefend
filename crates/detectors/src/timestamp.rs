@@ -59,7 +59,29 @@ impl Detector for BlockDependencyDetector {
             return Ok(findings);
         }
 
+        // FP Reduction: Skip contracts where timestamp use is expected by design
+        let source_lower = ctx.source_code.to_lowercase();
+
+        // Governance, timelocks, vesting, staking, and yield farming all legitimately use timestamps
+        let uses_time_by_design = source_lower.contains("timelock")
+            || source_lower.contains("governance")
+            || source_lower.contains("proposal")
+            || source_lower.contains("voting")
+            || source_lower.contains("vesting")
+            || source_lower.contains("staking")
+            || source_lower.contains("yield")
+            || source_lower.contains("reward")
+            || source_lower.contains("rewardpertoken")
+            || source_lower.contains("lastupdate")
+            || source_lower.contains("lastrewardtime")
+            || source_lower.contains("periodfinish");
+
+        if uses_time_by_design {
+            return Ok(crate::utils::filter_fp_findings(findings, ctx));
+        }
+
         for function in ctx.get_functions() {
+
             if let Some((has_dependency, manipulation_type)) =
                 self.has_timestamp_dependency(function, ctx)
             {
@@ -121,27 +143,6 @@ impl BlockDependencyDetector {
         ctx: &AnalysisContext,
     ) -> Option<(bool, String)> {
         if let Some(body) = &function.body {
-            // Get function source to check for specific patterns
-            let func_start = function.location.start().line();
-            let func_end = function.location.end().line();
-
-            let source_lines: Vec<&str> = ctx.source_code.lines().collect();
-            if func_start < source_lines.len() && func_end < source_lines.len() {
-                let func_source = source_lines[func_start..=func_end].join("\n");
-
-                // Check for specific manipulation types
-                if func_source.contains("VULNERABILITY")
-                    && func_source.contains("timestamp manipulation")
-                {
-                    if func_source.contains("time-based boost") || func_source.contains("TimeBoost")
-                    {
-                        return Some((true, "time_boost".to_string()));
-                    } else if func_source.contains("timestamp validation") {
-                        return Some((true, "timestamp_validation".to_string()));
-                    }
-                }
-            }
-
             if self.check_statements_for_timestamp_use(&body.statements) {
                 return Some((true, "general".to_string()));
             }
@@ -149,7 +150,6 @@ impl BlockDependencyDetector {
         Some((false, String::new()))
     }
 
-    /// Check statements for timestamp/block property usage
     fn check_statements_for_timestamp_use(&self, statements: &[ast::Statement<'_>]) -> bool {
         for stmt in statements {
             match stmt {
@@ -163,35 +163,110 @@ impl BlockDependencyDetector {
                         return true;
                     }
                 }
+                ast::Statement::VariableDeclaration {
+                    initial_value: Some(expr),
+                    ..
+                } => {
+                    if self.expression_uses_timestamp(expr) {
+                        return true;
+                    }
+                }
+                ast::Statement::If {
+                    condition,
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    if self.expression_uses_timestamp(condition) {
+                        return true;
+                    }
+                    if let ast::Statement::Block(b) = then_branch {
+                        if self.check_statements_for_timestamp_use(&b.statements) {
+                            return true;
+                        }
+                    }
+                    if let Some(ast::Statement::Block(b)) = else_branch {
+                        if self.check_statements_for_timestamp_use(&b.statements) {
+                            return true;
+                        }
+                    }
+                }
+                ast::Statement::For { body, .. } | ast::Statement::While { body, .. } => {
+                    if let ast::Statement::Block(b) = *body {
+                        if self.check_statements_for_timestamp_use(&b.statements) {
+                            return true;
+                        }
+                    }
+                }
+                ast::Statement::Return {
+                    value: Some(expr), ..
+                } => {
+                    if self.expression_uses_timestamp(expr) {
+                        return true;
+                    }
+                }
                 _ => {}
             }
         }
         false
     }
 
-    /// Check if expression uses timestamp or block properties
     fn expression_uses_timestamp(&self, expr: &ast::Expression<'_>) -> bool {
         match expr {
             ast::Expression::MemberAccess {
                 expression, member, ..
             } => {
-                if let ast::Expression::Identifier(id) = expression {
+                if let ast::Expression::Identifier(id) = &**expression {
                     if id.name == "block" {
                         let member_name = member.name.to_lowercase();
-                        return member_name == "timestamp"
+                        if member_name == "timestamp"
                             || member_name == "number"
-                            || member_name == "difficulty";
+                            || member_name == "difficulty"
+                        {
+                            return true;
+                        }
                     }
                 }
+                self.expression_uses_timestamp(expression)
             }
-            ast::Expression::FunctionCall { function, .. } => {
-                if let ast::Expression::Identifier(id) = function {
-                    // Check for now() function which is alias for block.timestamp
-                    return id.name == "now";
+            ast::Expression::FunctionCall {
+                function,
+                arguments,
+                ..
+            } => {
+                if let ast::Expression::Identifier(id) = &**function {
+                    if id.name == "now" {
+                        return true;
+                    }
                 }
+                if self.expression_uses_timestamp(function) {
+                    return true;
+                }
+                arguments.iter().any(|a| self.expression_uses_timestamp(a))
             }
-            _ => {}
+            ast::Expression::BinaryOperation { left, right, .. } => {
+                self.expression_uses_timestamp(left) || self.expression_uses_timestamp(right)
+            }
+            ast::Expression::Assignment { left, right, .. } => {
+                self.expression_uses_timestamp(left) || self.expression_uses_timestamp(right)
+            }
+            ast::Expression::UnaryOperation { operand, .. } => {
+                self.expression_uses_timestamp(operand)
+            }
+            ast::Expression::Conditional {
+                condition,
+                true_expression,
+                false_expression,
+                ..
+            } => {
+                self.expression_uses_timestamp(condition)
+                    || self.expression_uses_timestamp(true_expression)
+                    || self.expression_uses_timestamp(false_expression)
+            }
+            ast::Expression::IndexAccess { base, .. } => {
+                self.expression_uses_timestamp(base)
+            }
+            _ => false,
         }
-        false
     }
 }

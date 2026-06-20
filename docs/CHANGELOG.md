@@ -5,6 +5,41 @@ All notable changes to SolidityDefend will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## v2.0.11 (2026-06-19)
+
+### Fixed
+
+#### Detector Recall Improvements — 6 Detector Fixes, 9 Detector Registrations, +45% External Corpus TPs
+
+Systematic audit of detector pipeline found multiple root causes for missed true positives: unregistered detectors, incomplete AST walking, over-aggressive FP filters, and dead code paths.
+
+**Detector bug fixes**:
+- **`delegatecall-user-controlled`** — Detector existed as dead code, never registered in `lib.rs` or `registry.rs`. Also fixed deferral to non-existent `dangerous-delegatecall` detector; now emits findings directly
+- **`unchecked-external-call`** — Three bugs: (1) loop body recursion missing for `For`/`While`/`If`/`TryStatement`, (2) `is_array_or_internal_operation` blanket-rejected `IndexAccess` patterns and overly aggressive name heuristics, (3) tuple destructure `(bool success,) = to.call{value:}("")` not recognized as unchecked
+- **`missing-access-modifiers`** — Added 15 admin verb patterns: `setBeneficiary`, `setTreasury`, `setReceiver`, `setWallet`, `setCollector`, `setOracle`, `setPriceFeed`, `setImplementation`, `setProxy`, `setPendingOwner`, `setGovernor`, `setGuardian`, `setManager`, `setTimelock`, `setController`. Added `execute` and `initialize` to exact-match list
+- **`block-dependency` (timestamp)** — Removed comment-gated detection requiring literal `"VULNERABILITY"` string. Added full recursive AST walking for all statement and expression types. Added FP filter for governance/timelock/vesting/staking/yield contracts that legitimately use `block.timestamp`
+- **`readonly-reentrancy`** — `has_external_call()` now handles `VariableDeclaration` and `TryStatement` patterns
+- **`utils.rs`** — Removed `ends_with("Test")` from `is_test_contract()` which silently skipped contracts like `StakingTest`, `CleanAITest`
+
+**Newly registered detectors (9)**:
+- `delegatecall-user-controlled`, `dos-unbounded-operation`, `dos-external-call-loop`, `gas-griefing`, `oracle-manipulation`, `signature-malleability`, `block-dependency`, `unsafe-type-casting`, `centralization-risk`
+
+### Added
+
+- `/ship` skill for standardized shipping pipeline
+- `soliditydefend-code` and `soliditydefend-tests` custom agents
+
+### Validation
+
+- Detector count: **90** (was 81)
+- Unit tests: **471 passed, 0 failed** (was 444)
+- Ground truth recall: **149/149 (100%)**
+- Clean contract FP rate: **0%**
+- FP benchmark FP rate: **0%**
+- External corpus (`vulnerable-smart-contract-examples/`): **321 findings** (was 222, +45%)
+
+---
+
 ## v2.0.10 (2026-05-23)
 
 ### Fixed

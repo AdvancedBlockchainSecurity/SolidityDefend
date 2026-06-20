@@ -1060,6 +1060,10 @@ impl ReadOnlyReentrancyDetector {
             ast::Statement::Block(block) => {
                 block.statements.iter().any(|s| self.has_external_call(s))
             }
+            ast::Statement::VariableDeclaration {
+                initial_value: Some(expr),
+                ..
+            } => self.expression_has_external_call(expr),
             ast::Statement::If {
                 then_branch,
                 else_branch,
@@ -1072,6 +1076,9 @@ impl ReadOnlyReentrancyDetector {
             }
             ast::Statement::For { body, .. } => self.has_external_call(body),
             ast::Statement::While { body, .. } => self.has_external_call(body),
+            ast::Statement::TryStatement { body, .. } => {
+                body.statements.iter().any(|s| self.has_external_call(s))
+            }
             _ => false,
         }
     }

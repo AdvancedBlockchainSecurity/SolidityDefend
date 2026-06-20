@@ -423,6 +423,22 @@ impl MissingModifiersDetector {
             "setexecutor",
             "setupgrader",
             "setpauser",
+            // Critical setters for financial/governance addresses
+            "setbeneficiary",
+            "settreasury",
+            "setreceiver",
+            "setwallet",
+            "setcollector",
+            "setoracle",
+            "setpricefeed",
+            "setimplementation",
+            "setproxy",
+            "setpendingowner",
+            "setgovernor",
+            "setguardian",
+            "setmanager",
+            "settimelock",
+            "setcontroller",
         ];
 
         // These patterns are admin-only when they're the FULL name (not part of a user function)
@@ -434,6 +450,8 @@ impl MissingModifiersDetector {
             "recover",
             "distribute",
             "allocate",
+            "execute",
+            "initialize",
         ];
 
         // High-confidence: admin-only patterns that always need protection

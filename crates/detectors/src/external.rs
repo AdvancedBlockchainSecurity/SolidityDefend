@@ -188,6 +188,77 @@ impl UncheckedCallDetector {
                         findings.push(finding);
                     }
                 }
+                ast::Statement::VariableDeclaration {
+                    initial_value: Some(ast::Expression::FunctionCall {
+                        function: call_expr,
+                        ..
+                    }),
+                    ..
+                } => {
+                    if self.is_external_call(call_expr) {
+                        if !self.has_inline_success_check(func_source) {
+                            let message = format!(
+                                "External call in function '{}' does not check return value",
+                                function.name.name
+                            );
+
+                            let finding = self
+                                .base
+                                .create_finding(
+                                    ctx,
+                                    message,
+                                    function.name.location.start().line() as u32,
+                                    function.name.location.start().column() as u32,
+                                    function.name.name.len() as u32,
+                                )
+                                .with_cwe(252)
+                                .with_fix_suggestion(format!(
+                                    "Check the return value of external calls in function '{}'",
+                                    function.name.name
+                                ));
+
+                            findings.push(finding);
+                        }
+                    }
+                }
+                // Tuple destructure: (bool success, ) = addr.call{value:}("")
+                // Parser represents as Expression(Assignment { right: FunctionCall })
+                ast::Statement::Expression(ast::Expression::Assignment {
+                    right,
+                    ..
+                }) => {
+                    if let ast::Expression::FunctionCall {
+                        function: call_expr,
+                        ..
+                    } = *right
+                    {
+                        if self.is_external_call(call_expr) {
+                            if !self.has_inline_success_check(func_source) {
+                                let message = format!(
+                                    "External call in function '{}' does not check return value",
+                                    function.name.name
+                                );
+
+                                let finding = self
+                                    .base
+                                    .create_finding(
+                                        ctx,
+                                        message,
+                                        function.name.location.start().line() as u32,
+                                        function.name.location.start().column() as u32,
+                                        function.name.name.len() as u32,
+                                    )
+                                    .with_cwe(252)
+                                    .with_fix_suggestion(format!(
+                                        "Check the return value of external calls in function '{}'",
+                                        function.name.name
+                                    ));
+
+                                findings.push(finding);
+                            }
+                        }
+                    }
+                }
                 ast::Statement::Block(block) => {
                     self.check_statements_for_unchecked_calls(
                         &block.statements,
@@ -197,7 +268,73 @@ impl UncheckedCallDetector {
                         func_source,
                     );
                 }
+                ast::Statement::For { body, .. }
+                | ast::Statement::While { body, .. } => {
+                    self.recurse_into_statement(body, ctx, findings, function, func_source);
+                }
+                ast::Statement::If {
+                    then_branch,
+                    else_branch,
+                    ..
+                } => {
+                    self.recurse_into_statement(then_branch, ctx, findings, function, func_source);
+                    if let Some(else_stmt) = else_branch {
+                        self.recurse_into_statement(else_stmt, ctx, findings, function, func_source);
+                    }
+                }
+                ast::Statement::TryStatement {
+                    body,
+                    catch_clauses,
+                    ..
+                } => {
+                    self.check_statements_for_unchecked_calls(
+                        &body.statements,
+                        ctx,
+                        findings,
+                        function,
+                        func_source,
+                    );
+                    for clause in catch_clauses {
+                        self.check_statements_for_unchecked_calls(
+                            &clause.body.statements,
+                            ctx,
+                            findings,
+                            function,
+                            func_source,
+                        );
+                    }
+                }
                 _ => {}
+            }
+        }
+    }
+
+    fn recurse_into_statement(
+        &self,
+        stmt: &ast::Statement<'_>,
+        ctx: &AnalysisContext<'_>,
+        findings: &mut Vec<Finding>,
+        function: &ast::Function<'_>,
+        func_source: &str,
+    ) {
+        match stmt {
+            ast::Statement::Block(block) => {
+                self.check_statements_for_unchecked_calls(
+                    &block.statements,
+                    ctx,
+                    findings,
+                    function,
+                    func_source,
+                );
+            }
+            other => {
+                self.check_statements_for_unchecked_calls(
+                    std::slice::from_ref(other),
+                    ctx,
+                    findings,
+                    function,
+                    func_source,
+                );
             }
         }
     }
@@ -310,34 +447,23 @@ impl UncheckedCallDetector {
         false
     }
 
-    /// Check if expression looks like an internal/array operation (not an external call target)
+    /// Check if expression looks like an internal/array operation (not an external call target).
+    /// Only suppresses push/pop on known collection names — NOT index access, because
+    /// `array[i].call{value:}()` is a legitimate external call pattern (batch payouts).
     fn is_array_or_internal_operation(&self, expr: &ast::Expression<'_>) -> bool {
         match expr {
-            // Array access like shareholders[i] or direct identifier like shareholders
             ast::Expression::Identifier(id) => {
                 let name = id.name.to_lowercase();
-                // Common array/mapping variable names
+                // Only suppress known internal array methods, not address-typed arrays
                 name.contains("array")
                     || name.contains("list")
-                    || name.contains("holders")
                     || name.contains("shareholders")
-                    || name.contains("members")
-                    || name.contains("users")
-                    || name.contains("addresses")
-                    || name.contains("balances")
                     || name.contains("allowances")
-                    || name.contains("shares")
-                    || name.contains("tokens")
-                    || name.ends_with("s") && name.len() > 3 // plurals often indicate arrays
             }
-            // Index access like mapping[key] or array[index]
-            ast::Expression::IndexAccess { .. } => true,
-            // Member access chain - check inner expression
             ast::Expression::MemberAccess {
                 expression, member, ..
             } => {
-                // If accessing .length, it's an array
-                if member.name == "length" {
+                if member.name == "length" || member.name == "push" || member.name == "pop" {
                     return true;
                 }
                 self.is_array_or_internal_operation(expression)

@@ -1360,31 +1360,19 @@ pub fn is_test_contract(ctx: &AnalysisContext) -> bool {
 
     // Contract name patterns indicating test/mock - check word boundaries
     let is_test_name =
-        // Exact match for "Test" (standalone test contract)
         name == "test"
-        // Names starting with Test followed by uppercase (e.g., TestToken, TestVault)
-        // Check original name for proper case
         || ctx.contract.name.name.starts_with("Test")
-        // Names ending with "_test" or "Test" (proper case) for clear suffix
         || name.ends_with("_test")
-        || ctx.contract.name.name.ends_with("Test")
         // Clear mock prefixes/suffixes with proper boundaries
         || name.starts_with("mock")
         || name.ends_with("_mock")
         || ctx.contract.name.name.ends_with("Mock")
-        // Other clear test indicators
         || name.contains("_test_")
         || name.starts_with("t_")
-        // Demo/example/stub patterns
         || name.contains("example")
         || name.contains("demo")
         || name.contains("stub")
         || name.starts_with("fake");
-    // Note: "MEVTest" won't match because:
-    // - doesn't start with "Test" (starts with "MEV")
-    // - doesn't end with "_test" or proper "Test" (has "MEVTest" which ends with "Test" but is lowercase "mevtest")
-    // Wait, ctx.contract.name.name.ends_with("Test") WOULD match "MEVTest"...
-    // Let me be even more specific
 
     // File path patterns indicating test directory
     let is_test_file = file.contains("/test/")
