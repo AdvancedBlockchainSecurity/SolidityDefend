@@ -439,6 +439,16 @@ impl MissingModifiersDetector {
             "setmanager",
             "settimelock",
             "setcontroller",
+            // Restaking / staking protocol admin verbs
+            "slash",
+            "freeze",
+            "forceundelegate",
+            "forceslash",
+            "addoperatortoquorum",
+            "removeoperator",
+            "freezeoperator",
+            "confiscate",
+            "penalize",
         ];
 
         // These patterns are admin-only when they're the FULL name (not part of a user function)
@@ -1724,9 +1734,143 @@ impl Detector for StateVariableVisibilityDetector {
 mod tests {
     use super::*;
 
+    /// Parse `source` with the real Solidity parser and run `detector.detect`
+    /// against the first contract. Populates the AST (functions, modifiers) so
+    /// the detector evaluates real function signatures end to end.
+    fn detect_findings(detector: &MissingModifiersDetector, source: &str) -> Vec<Finding> {
+        use ast::arena::AstArena;
+        use parser::Parser;
+        use semantic::SymbolTable;
+
+        let arena = Box::leak(Box::new(AstArena::new()));
+        let parser = Parser::new();
+        let source_file = parser
+            .parse(arena, source, "test.sol")
+            .expect("source should parse");
+        let contract = source_file
+            .contracts
+            .first()
+            .expect("source should contain a contract");
+        let ctx = AnalysisContext::new(
+            contract,
+            SymbolTable::new(),
+            source.to_string(),
+            "test.sol".to_string(),
+        );
+        detector.detect(&ctx).expect("detect should succeed")
+    }
+
     // =========================================================================
     // MissingModifiersDetector helper method tests
     // =========================================================================
+
+    /// Regression: critical setters (setOracle, setImplementation,
+    /// setPendingOwner) must be recognized as requiring access control.
+    #[test]
+    fn test_requires_access_control_critical_setters() {
+        let detector = MissingModifiersDetector::new();
+        assert!(detector.requires_access_control("setOracle"));
+        assert!(detector.requires_access_control("setImplementation"));
+        assert!(detector.requires_access_control("setPendingOwner"));
+        assert!(detector.requires_access_control("setPriceFeed"));
+        assert!(detector.requires_access_control("setGuardian"));
+        assert!(detector.requires_access_control("setTimelock"));
+    }
+
+    /// Regression: restaking/slashing admin verbs must be recognized as
+    /// requiring access control.
+    #[test]
+    fn test_requires_access_control_restaking_verbs() {
+        let detector = MissingModifiersDetector::new();
+        assert!(detector.requires_access_control("slashOperator"));
+        assert!(detector.requires_access_control("freezeOperator"));
+        assert!(detector.requires_access_control("forceUndelegate"));
+        assert!(detector.requires_access_control("forceSlash"));
+        assert!(detector.requires_access_control("confiscate"));
+        assert!(detector.requires_access_control("penalize"));
+    }
+
+    /// Regression (end-to-end): setOracle without any modifier must fire.
+    #[test]
+    fn test_set_oracle_without_modifier_fires() {
+        let detector = MissingModifiersDetector::new();
+        let source = r#"
+            contract PriceConsumer {
+                address public oracle;
+                uint256 public value;
+                function setOracle(address _oracle) external {
+                    oracle = _oracle;
+                }
+                function readValue() external view returns (uint256) {
+                    return value;
+                }
+            }
+        "#;
+        let findings = detect_findings(&detector, source);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.message.contains("setOracle")),
+            "setOracle without an access modifier should fire"
+        );
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.detector_id.0 == "missing-access-modifiers"),
+            "all findings should come from missing-access-modifiers"
+        );
+    }
+
+    /// Regression (end-to-end): a restaking verb (slashOperator) without a
+    /// modifier must fire.
+    #[test]
+    fn test_slash_operator_without_modifier_fires() {
+        let detector = MissingModifiersDetector::new();
+        let source = r#"
+            contract Restaking {
+                mapping(address => uint256) public stakes;
+                uint256 public total;
+                function slashOperator(address operator, uint256 amount) external {
+                    stakes[operator] -= amount;
+                    total -= amount;
+                }
+                function totalStaked() external view returns (uint256) {
+                    return total;
+                }
+            }
+        "#;
+        let findings = detect_findings(&detector, source);
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.message.contains("slashOperator")),
+            "slashOperator without an access modifier should fire"
+        );
+    }
+
+    /// FP regression (end-to-end): setOracle WITH onlyOwner must NOT fire.
+    #[test]
+    fn test_set_oracle_with_only_owner_does_not_fire() {
+        let detector = MissingModifiersDetector::new();
+        let source = r#"
+            contract PriceConsumer {
+                address public oracle;
+                address public owner;
+                modifier onlyOwner() { require(msg.sender == owner); _; }
+                function setOracle(address _oracle) external onlyOwner {
+                    oracle = _oracle;
+                }
+                function readOracle() external view returns (address) {
+                    return oracle;
+                }
+            }
+        "#;
+        let findings = detect_findings(&detector, source);
+        assert!(
+            !findings.iter().any(|f| f.message.contains("setOracle")),
+            "setOracle with onlyOwner modifier should not fire (FP regression)"
+        );
+    }
 
     /// Test that requires_access_control identifies admin-only function names
     #[test]

@@ -47,8 +47,8 @@ jobs:
         run: |
           COUNT=$(./target/release/soliditydefend --list-detectors | grep -E '^  [a-z]' | wc -l)
           echo "Detector count: $COUNT"
-          if [ "$COUNT" -lt 60 ]; then
-            echo "ERROR: Expected at least 60 detectors, found $COUNT"
+          if [ "$COUNT" -lt 90 ]; then
+            echo "ERROR: Expected at least 90 detectors, found $COUNT — a detector was likely accidentally unregistered"
             exit 1
           fi
 

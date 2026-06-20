@@ -270,3 +270,128 @@ impl BlockDependencyDetector {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::detector::Detector;
+
+    /// Parse `source` with the real Solidity parser and run `detector.detect`
+    /// against the first contract. Returns the findings produced. Unlike
+    /// `create_test_context`, this populates the AST (functions, statements,
+    /// state variables) so AST-walking detectors actually see the code.
+    fn detect_findings(detector: &BlockDependencyDetector, source: &str) -> Vec<Finding> {
+        use ast::arena::AstArena;
+        use parser::Parser;
+        use semantic::SymbolTable;
+
+        let arena = Box::leak(Box::new(AstArena::new()));
+        let parser = Parser::new();
+        let source_file = parser
+            .parse(arena, source, "test.sol")
+            .expect("source should parse");
+        let contract = source_file
+            .contracts
+            .first()
+            .expect("source should contain a contract");
+        let ctx = AnalysisContext::new(
+            contract,
+            SymbolTable::new(),
+            source.to_string(),
+            "test.sol".to_string(),
+        );
+        detector.detect(&ctx).expect("detect should succeed")
+    }
+
+    #[test]
+    fn test_detector_properties() {
+        let detector = BlockDependencyDetector::new();
+        assert_eq!(detector.id().0, "block-dependency");
+        assert!(detector.is_enabled());
+    }
+
+    /// A lottery/random-selection contract that uses block.timestamp for
+    /// selecting a winner must fire. This is the core TP for block-dependency.
+    #[test]
+    fn test_lottery_random_selection_fires() {
+        let detector = BlockDependencyDetector::new();
+        let source = r#"
+            contract Lottery {
+                address[] public players;
+                address public winner;
+
+                function pickWinner() external {
+                    uint256 index = uint256(block.timestamp) % players.length;
+                    winner = players[index];
+                }
+            }
+        "#;
+        let findings = detect_findings(&detector, source);
+        assert!(
+            !findings.is_empty(),
+            "lottery using block.timestamp for winner selection should fire"
+        );
+        assert!(
+            findings.iter().all(|f| f.detector_id.0 == "block-dependency"),
+            "all findings should come from block-dependency"
+        );
+    }
+
+    /// FP regression: a staking contract that uses block.timestamp purely for
+    /// reward accrual must NOT fire. The detector skips contracts where time
+    /// use is expected by design ("staking"/"reward").
+    #[test]
+    fn test_staking_reward_calculation_does_not_fire() {
+        let detector = BlockDependencyDetector::new();
+        let source = r#"
+            contract StakingRewards {
+                mapping(address => uint256) public stakedAt;
+                mapping(address => uint256) public balances;
+                uint256 public rewardRate = 100;
+
+                function stake(uint256 amount) external {
+                    balances[msg.sender] += amount;
+                    stakedAt[msg.sender] = block.timestamp;
+                }
+
+                function earned(address account) public view returns (uint256) {
+                    uint256 duration = block.timestamp - stakedAt[account];
+                    return duration * rewardRate * balances[account];
+                }
+            }
+        "#;
+        let findings = detect_findings(&detector, source);
+        assert!(
+            findings.is_empty(),
+            "staking reward calculation using block.timestamp should not fire (FP regression)"
+        );
+    }
+
+    /// FP regression: a governance/timelock contract that uses block.timestamp
+    /// for execution delays must NOT fire. The detector skips "governance"/
+    /// "timelock" contexts.
+    #[test]
+    fn test_governance_timelock_does_not_fire() {
+        let detector = BlockDependencyDetector::new();
+        let source = r#"
+            contract Timelock {
+                uint256 public constant DELAY = 2 days;
+                mapping(bytes32 => uint256) public queuedAt;
+
+                function queue(bytes32 id) external {
+                    queuedAt[id] = block.timestamp;
+                }
+
+                function execute(bytes32 id) external {
+                    require(block.timestamp >= queuedAt[id] + DELAY, "timelock not elapsed");
+                    queuedAt[id] = 0;
+                }
+            }
+        "#;
+        let findings = detect_findings(&detector, source);
+        assert!(
+            findings.is_empty(),
+            "governance/timelock using block.timestamp for delays should not fire (FP regression)"
+        );
+    }
+}

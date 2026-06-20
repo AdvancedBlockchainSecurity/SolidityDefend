@@ -631,13 +631,16 @@ impl SignatureReplayDetector {
         let cleaned = utils::clean_source_for_search(source);
         let lower = cleaned.to_lowercase();
 
-        // Nonce tracking patterns at contract level
-        let nonce_patterns = [
-            "mapping", // needs to be combined with nonce
+        // Nonce tracking patterns at contract level — must be specific enough to avoid
+        // matching every contract that has a mapping() of any kind.
+        // "mapping" alone is NOT sufficient; it must be combined with "nonce".
+        let nonce_specific_patterns = [
             "nonces[",
             "usednonces[",
             "usedsignatures[",
+            "usedsignatures",   // catches: mapping(...) public usedSignatures; declarations
             "usedhashes[",
+            "usedhashes",       // catches: mapping(...) public usedHashes; declarations
             "invalidatenonce",
             "_usenonce",
             "nonce++",
@@ -646,9 +649,11 @@ impl SignatureReplayDetector {
             "nonces[owner]",
         ];
 
-        // Check for nonce mapping declarations or usage
+        // Check for nonce mapping declarations or usage:
+        // Either a mapping() combined with "nonce" keyword (e.g., mapping(address=>uint256) public nonces)
+        // OR a specific nonce usage pattern (nonces[...], usedNonces[...], etc.)
         let has_nonce_mapping = (lower.contains("mapping") && lower.contains("nonce"))
-            || nonce_patterns.iter().any(|&p| lower.contains(p));
+            || nonce_specific_patterns.iter().any(|&p| lower.contains(p));
 
         // Governance vote tracking (hasVoted, receipts mapping) prevents replay by design
         let has_vote_tracking = lower.contains("hasvoted")
@@ -677,10 +682,30 @@ impl SignatureReplayDetector {
         let raw_source = source_lines[func_start..=func_end].join("\n");
         let func_source = utils::clean_source_for_search(&raw_source);
 
-        // Require actual cryptographic signature verification calls
-        func_source.contains("ecrecover")
+        // Require actual cryptographic signature verification calls in the function body,
+        // OR the function calls a recovery helper that wraps ecrecover (common pattern where
+        // a contract defines recoverSigner/recoverAddress which internally uses ecrecover).
+        let direct_verification = func_source.contains("ecrecover")
             || func_source.contains("ECDSA.recover")
-            || func_source.contains("SignatureChecker.isValidSignatureNow")
+            || func_source.contains("SignatureChecker.isValidSignatureNow");
+
+        if direct_verification {
+            return true;
+        }
+
+        // Check for indirect verification: function calls a helper that uses ecrecover
+        // and the contract itself contains ecrecover (indicating the helper is local)
+        let calls_recovery_helper = func_source.contains("recoverSigner(")
+            || func_source.contains("recoverAddress(")
+            || func_source.contains("recover(");
+
+        if calls_recovery_helper {
+            let contract_source = crate::utils::get_contract_source(ctx);
+            return contract_source.contains("ecrecover")
+                || contract_source.contains("ECDSA.recover");
+        }
+
+        false
     }
 
     fn has_signature_replay_vulnerability(
@@ -747,7 +772,20 @@ impl SignatureReplayDetector {
             let func_source = utils::clean_source_for_search(&raw_source);
             let func_lower = func_source.to_lowercase();
 
-            let nonce_patterns = ["nonce", "nonces", "_nonce", "counter", "replay", "used"];
+            // Patterns indicating this function already has replay protection:
+            // - nonce: any direct nonce usage
+            // - counter: incrementing counter (replay prevention)
+            // - replay: explicit replay protection check
+            // - "used": e.g. `usedHashes`, `usedSignatures` variables
+            // - "initialized": one-time-use initialization guard (e.g. require(!initialized))
+            // - "!initialized": explicit one-time-use guard pattern
+            // Note: "used" alone (without other context) is checked; false positives are
+            // filtered by the contract-level check below.
+            let nonce_patterns = [
+                "nonce", "nonces", "_nonce", "counter", "replay",
+                "usedhash", "usedsig", "usednonce",
+                "!initialized", "require(!initialized",
+            ];
             let has_nonce_protection = nonce_patterns
                 .iter()
                 .any(|&pattern| func_lower.contains(pattern));
@@ -761,7 +799,11 @@ impl SignatureReplayDetector {
         // If the contract has nonce tracking, vote tracking, or similar patterns
         // at the state variable level, the function likely delegates replay
         // protection to those mechanisms (even if not visible in this function body).
-        if self.has_contract_level_replay_protection(&ctx.source_code) {
+        // Use contract-scoped source to avoid cross-contract FPs in multi-contract files
+        // where a later contract has nonces but an earlier vulnerable one does not.
+        let contract_source = crate::utils::get_contract_source(ctx);
+        let has_contract_protection = self.has_contract_level_replay_protection(&contract_source);
+        if has_contract_protection {
             return false;
         }
 
@@ -1450,6 +1492,100 @@ mod tests {
         assert!(
             !detector.is_non_governance_contract(&ctx),
             "Actual governance contract should NOT be detected as non-governance"
+        );
+    }
+
+    #[test]
+    fn test_tp_basic_signature_replay_no_contract_protection() {
+        // Verify that a contract with mapping(balances) but no nonce mapping
+        // is correctly identified as lacking contract-level replay protection.
+        // The "mapping" pattern alone must NOT trigger has_contract_level_replay_protection.
+        let detector = SignatureReplayDetector::new();
+
+        // Contract with only a balance mapping (no nonce protection)
+        let no_nonce_source = r#"
+            contract TestSignatureReplay {
+                mapping(address => uint256) public balances;
+            }
+        "#;
+        assert!(
+            !detector.has_contract_level_replay_protection(no_nonce_source),
+            "A contract with only balances mapping should NOT have replay protection"
+        );
+
+        // Contract with nonce mapping (has protection)
+        let with_nonce_source = r#"
+            contract TokenWithPermit {
+                mapping(address => uint256) public nonces;
+            }
+        "#;
+        assert!(
+            detector.has_contract_level_replay_protection(with_nonce_source),
+            "A contract with nonces mapping should have replay protection"
+        );
+
+        // usedSignatures mapping (has protection)
+        let with_used_sigs = r#"
+            contract WithUsedSigs {
+                mapping(bytes32 => bool) public usedSignatures;
+            }
+        "#;
+        assert!(
+            detector.has_contract_level_replay_protection(with_used_sigs),
+            "A contract with usedSignatures mapping should have replay protection"
+        );
+    }
+
+    // ============ Signature-replay nonce-mapping regression tests ============
+
+    /// Regression: a contract with `mapping(address => uint256) public nonces`
+    /// is correctly recognized as having replay protection (so no finding).
+    #[test]
+    fn test_nonce_mapping_counts_as_replay_protection() {
+        let detector = SignatureReplayDetector::new();
+        let source = r#"
+            contract Permit {
+                mapping(address => uint256) public nonces;
+            }
+        "#;
+        assert!(
+            detector.has_contract_level_replay_protection(source),
+            "mapping(address => uint256) public nonces should be replay protection"
+        );
+    }
+
+    /// Regression: a contract with only `mapping(address => bool) public used`
+    /// (a generic flag, NOT nonce-based) must NOT be treated as replay
+    /// protection. "used" alone is too generic to imply nonce/signature tracking.
+    #[test]
+    fn test_generic_used_mapping_is_not_replay_protection() {
+        let detector = SignatureReplayDetector::new();
+        let source = r#"
+            contract Flagged {
+                mapping(address => bool) public used;
+            }
+        "#;
+        assert!(
+            !detector.has_contract_level_replay_protection(source),
+            "mapping(address => bool) public used (no nonce) must NOT be replay protection"
+        );
+    }
+
+    /// Regression for the core bug: a contract with only a bare `mapping`
+    /// declaration and no nonce keyword must NOT be treated as replay
+    /// protection. Previously the presence of any `mapping` was wrongly
+    /// counted as replay protection.
+    #[test]
+    fn test_bare_mapping_is_not_replay_protection() {
+        let detector = SignatureReplayDetector::new();
+        let source = r#"
+            contract BareMapping {
+                mapping(address => uint256) public balances;
+            }
+        "#;
+        assert!(
+            !detector.has_contract_level_replay_protection(source),
+            "a bare mapping with no nonce keyword must NOT be replay protection"
         );
     }
 }

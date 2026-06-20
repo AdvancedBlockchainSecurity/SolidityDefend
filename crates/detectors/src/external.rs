@@ -488,6 +488,112 @@ mod tests {
     use super::*;
     use bumpalo::collections::Vec as BumpVec;
 
+    /// Parse `source` with the real Solidity parser and run `detector.detect`
+    /// against the first contract. Populates the AST so statement-walking logic
+    /// (loops, tuple destructure, index-access calls) is exercised end to end.
+    fn detect_findings(detector: &UncheckedCallDetector, source: &str) -> Vec<Finding> {
+        use ast::arena::AstArena;
+        use parser::Parser;
+        use semantic::SymbolTable;
+
+        let arena = Box::leak(Box::new(AstArena::new()));
+        let parser = Parser::new();
+        let source_file = parser
+            .parse(arena, source, "test.sol")
+            .expect("source should parse");
+        let contract = source_file
+            .contracts
+            .first()
+            .expect("source should contain a contract");
+        let ctx = AnalysisContext::new(
+            contract,
+            SymbolTable::new(),
+            source.to_string(),
+            "test.sol".to_string(),
+        );
+        detector.detect(&ctx).expect("detect should succeed")
+    }
+
+    /// Regression: a low-level `.call{}()` inside a `for` loop body must be
+    /// detected. The detector recurses into loop bodies.
+    #[test]
+    fn test_unchecked_call_in_for_loop_fires() {
+        let detector = UncheckedCallDetector::new();
+        let source = r#"
+            contract Payouts {
+                address[] public recipients;
+                function payAll() external {
+                    for (uint256 i = 0; i < recipients.length; i++) {
+                        recipients[i].call{value: 1 ether}("");
+                    }
+                }
+            }
+        "#;
+        let findings = detect_findings(&detector, source);
+        assert!(
+            !findings.is_empty(),
+            "unchecked .call{{}}() inside a for loop should be detected"
+        );
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.detector_id.0 == "unchecked-external-call"),
+            "all findings should come from unchecked-external-call"
+        );
+    }
+
+    /// Regression: a tuple-destructured call `(bool success,) = addr.call{...}("")`
+    /// with no subsequent success check must be detected.
+    #[test]
+    fn test_tuple_destructure_unchecked_call_fires() {
+        let detector = UncheckedCallDetector::new();
+        let source = r#"
+            contract Sender {
+                function pay(address payable addr, uint256 v) external {
+                    (bool success, ) = addr.call{value: v}("");
+                }
+            }
+        "#;
+        let findings = detect_findings(&detector, source);
+        assert!(
+            !findings.is_empty(),
+            "tuple-destructured call with no success check should be detected"
+        );
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.detector_id.0 == "unchecked-external-call"),
+            "all findings should come from unchecked-external-call"
+        );
+    }
+
+    /// Regression: previously the IndexAccess target `accounts[i].call{...}("")`
+    /// (array element call) was not recognized as an external call. It must be
+    /// detected now.
+    #[test]
+    fn test_index_access_array_element_call_fires() {
+        let detector = UncheckedCallDetector::new();
+        let source = r#"
+            contract Disburse {
+                address[] public accounts;
+                function send(uint256 i, uint256 v) external {
+                    accounts[i].call{value: v}("");
+                }
+            }
+        "#;
+        let findings = detect_findings(&detector, source);
+        assert!(
+            !findings.is_empty(),
+            "array-element call accounts[i].call{{}}() should be detected"
+        );
+        assert!(
+            findings
+                .iter()
+                .all(|f| f.detector_id.0 == "unchecked-external-call"),
+            "all findings should come from unchecked-external-call"
+        );
+    }
+
     #[test]
     fn test_detector_properties() {
         let detector = UncheckedCallDetector::new();

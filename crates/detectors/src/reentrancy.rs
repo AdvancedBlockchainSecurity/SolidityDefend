@@ -1339,4 +1339,116 @@ mod tests {
         "#;
         assert!(detector.is_pull_payment_pattern(src));
     }
+
+    // =====================================================================
+    // ReadOnlyReentrancyDetector regression tests
+    //
+    // These target the helper methods that were fixed to walk additional
+    // statement variants. The detector's `detect()` cannot be used end to end
+    // here because the global FpFilter suppresses findings located on view
+    // functions (the read-only finding is emitted on the view function), so we
+    // exercise the underlying detection helpers directly on a parsed contract.
+    // =====================================================================
+
+    /// Parse `source` and return the named function from the named contract.
+    /// Leaks the arena (test-only) so the borrowed AST lives long enough.
+    fn parse_named_function(
+        source: &'static str,
+        contract_name: &str,
+        function_name: &str,
+    ) -> &'static ast::Function<'static> {
+        use ast::arena::AstArena;
+        use parser::Parser;
+
+        let arena = Box::leak(Box::new(AstArena::new()));
+        let parser = Parser::new();
+        let source_file = Box::leak(Box::new(
+            parser
+                .parse(arena, source, "test.sol")
+                .expect("source should parse"),
+        ));
+        let contract = source_file
+            .contracts
+            .iter()
+            .find(|c| c.name.name == contract_name)
+            .expect("contract not found");
+        contract
+            .functions
+            .iter()
+            .find(|f| f.name.name == function_name)
+            .expect("function not found")
+    }
+
+    /// Regression: an external call captured into a VariableDeclaration
+    /// (`bool ok = to.send(amount);`) must be recognized by `has_external_call`
+    /// / `function_has_external_call`. Previously the VariableDeclaration
+    /// statement variant was not walked, missing the call.
+    #[test]
+    fn test_readonly_external_call_in_variable_declaration() {
+        let detector = ReadOnlyReentrancyDetector::new();
+        let source = r#"
+            contract Vault {
+                uint256 public price;
+                function withdraw(address payable to, uint256 amount) external {
+                    bool ok = to.send(amount);
+                    require(ok);
+                    price = amount;
+                }
+            }
+        "#;
+        let withdraw = parse_named_function(source, "Vault", "withdraw");
+        assert!(
+            detector.function_has_external_call(withdraw),
+            "external call inside a VariableDeclaration should be detected"
+        );
+    }
+
+    /// Regression: an external call inside a TryStatement body must be
+    /// recognized by `has_external_call`. Previously the TryStatement variant
+    /// was not walked.
+    #[test]
+    fn test_readonly_external_call_in_try_statement() {
+        let detector = ReadOnlyReentrancyDetector::new();
+        let source = r#"
+            interface IOracle { function refresh() external returns (uint256); }
+            contract Vault {
+                uint256 public price;
+                IOracle public oracle;
+                function update() external {
+                    try oracle.refresh() returns (uint256 p) {
+                        bool ok = payable(msg.sender).send(p);
+                        require(ok);
+                    } catch {
+                        price = 0;
+                    }
+                }
+            }
+        "#;
+        let update = parse_named_function(source, "Vault", "update");
+        assert!(
+            detector.function_has_external_call(update),
+            "external call inside a TryStatement body should be detected"
+        );
+    }
+
+    /// Companion check: a view function reading a state variable is recognized
+    /// by `relies_on_external_state` (the other half of the read-only pattern).
+    #[test]
+    fn test_readonly_view_function_reads_state() {
+        let detector = ReadOnlyReentrancyDetector::new();
+        let source = r#"
+            contract Vault {
+                uint256 public price;
+                function getPrice() external view returns (uint256) {
+                    return price;
+                }
+            }
+        "#;
+        let get_price = parse_named_function(source, "Vault", "getPrice");
+        assert!(detector.is_view_function(get_price));
+        assert!(
+            detector.relies_on_external_state(get_price),
+            "view function returning a state variable should read state"
+        );
+    }
 }
