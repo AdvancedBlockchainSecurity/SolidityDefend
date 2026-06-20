@@ -24,9 +24,8 @@ use crate::utils;
 ///
 /// ## FP Reduction
 ///
-/// This detector defers to `dangerous-delegatecall` for patterns it already covers,
-/// including direct address-parameter delegatecall, proxy/diamond patterns, and
-/// owner-managed storage lookups. It avoids double-reporting on the same function.
+/// Skips proxy/diamond pattern contracts, functions with access control modifiers,
+/// and owner-managed storage lookups where the user only controls the index/key.
 ///
 pub struct DelegatecallUserControlledDetector {
     base: BaseDetector,
@@ -91,7 +90,6 @@ impl Detector for DelegatecallUserControlledDetector {
         }
 
         // FP Reduction: Skip proxy contracts - delegatecall is by design in proxies
-        // The dangerous-delegatecall detector handles proxy-specific risks separately.
         if utils::is_proxy_contract(ctx) {
             return Ok(findings);
         }
@@ -102,7 +100,6 @@ impl Detector for DelegatecallUserControlledDetector {
         }
 
         // FP Reduction: Skip Diamond pattern (EIP-2535) contracts
-        // Diamond contracts use delegatecall to facets by design
         if self.is_diamond_contract(ctx) {
             return Ok(findings);
         }
@@ -160,9 +157,7 @@ impl DelegatecallUserControlledDetector {
         // Get function source
         let func_source = self.get_function_source(function, ctx);
 
-        // FP Reduction: Skip modifier definitions that the parser may have included
-        // as functions. Modifiers are not direct attack surface in the same way as
-        // public/external functions. Check if the source starts with "modifier ".
+        // FP Reduction: Skip modifier definitions
         if func_source.trim_start().starts_with("modifier ") {
             return None;
         }
@@ -173,9 +168,6 @@ impl DelegatecallUserControlledDetector {
         }
 
         // FP Reduction: Skip functions with access control modifiers.
-        // If the function is protected by onlyOwner/onlyAdmin/etc., the delegatecall
-        // target is restricted to authorized callers. The dangerous-delegatecall
-        // detector handles access-controlled delegatecall separately.
         if utils::has_access_control_modifier(&func_source)
             || func_source.contains("require(msg.sender ==")
             || func_source.contains("require(msg.sender==")
@@ -185,24 +177,19 @@ impl DelegatecallUserControlledDetector {
             return None;
         }
 
-        // FP Reduction: Defer to dangerous-delegatecall for direct address-parameter patterns.
-        // When a function has a direct address parameter that flows into delegatecall,
-        // the dangerous-delegatecall detector already covers this exact pattern.
-        // This detector should not double-report.
-        if self.is_direct_address_param_delegatecall(&func_source, function) {
-            return None;
-        }
-
         // FP Reduction: Skip owner-managed storage lookup patterns.
-        // When the delegatecall target comes from an array/mapping that is populated
-        // exclusively by an owner function, the user only controls the index/key,
-        // not the actual target address.
         if self.is_owner_managed_storage_lookup(&func_source, ctx) {
             return None;
         }
 
-        // Check if target is user-controlled via indirect/non-obvious paths
-        // (patterns NOT already covered by dangerous-delegatecall)
+        if self.is_direct_address_param_delegatecall(&func_source, function) {
+            return Some(
+                "Delegatecall target comes directly from a function parameter, \
+                allowing callers to execute arbitrary code in the contract's context."
+                    .to_string(),
+            );
+        }
+
         if self.is_target_user_controlled_indirect(&func_source) {
             return Some(
                 "Delegatecall target is derived from function parameters or user input, \
@@ -215,7 +202,7 @@ impl DelegatecallUserControlledDetector {
     }
 
     /// Check if function has a direct address parameter used in delegatecall.
-    /// This is the primary pattern that dangerous-delegatecall already detects.
+    /// Check if a direct address parameter is used as the delegatecall target.
     fn is_direct_address_param_delegatecall(
         &self,
         source: &str,
@@ -231,7 +218,7 @@ impl DelegatecallUserControlledDetector {
                     continue;
                 }
 
-                // Direct address param used in delegatecall - dangerous-delegatecall covers this
+                // Direct address param used in delegatecall
                 if source.contains(&format!("{}.delegatecall", param_str))
                     || source.contains(&format!("delegatecall({}", param_str))
                 {
@@ -248,7 +235,7 @@ impl DelegatecallUserControlledDetector {
         }
 
         // Check for implementation parameter patterns in the function signature
-        // These are always covered by dangerous-delegatecall
+        // Check for implementation parameter patterns in the function signature
         let sig_lines: Vec<&str> = source.lines().take(5).collect();
         let sig_area = sig_lines.join(" ");
         if (sig_area.contains("address _implementation")
@@ -316,11 +303,11 @@ impl DelegatecallUserControlledDetector {
     }
 
     /// Check if delegatecall target is user-controlled through indirect paths
-    /// that are NOT already covered by dangerous-delegatecall.
+    /// that indicate indirect user control of delegatecall targets.
     /// This catches more subtle patterns like msg.sender-based delegatecall.
     fn is_target_user_controlled_indirect(&self, source: &str) -> bool {
         // Check for msg.sender delegatecall (less common but still user-controlled)
-        // This is a rare pattern not well covered by dangerous-delegatecall
+        // Rare pattern: indirect user control of delegatecall target
         if source.contains("msg.sender.delegatecall") || source.contains("msg.sender).delegatecall")
         {
             return true;

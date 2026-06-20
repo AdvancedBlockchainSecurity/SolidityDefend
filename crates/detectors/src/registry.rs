@@ -462,12 +462,51 @@ impl DetectorRegistry {
             crate::delegatecall_untrusted_library::DelegatecallUntrustedLibraryDetector::new(),
         ));
         self.register(Arc::new(
+            crate::delegatecall_user_controlled::DelegatecallUserControlledDetector::new(),
+        ));
+        self.register(Arc::new(
             crate::upgradeable_proxy_issues::UpgradeableProxyIssuesDetector::new(),
         ));
 
         // Selfdestruct
         self.register(Arc::new(
             crate::selfdestruct_abuse::SelfdestructAbuseDetector::new(),
+        ));
+
+        // DoS & Gas Attacks
+        self.register(Arc::new(
+            crate::dos_unbounded_operation::DosUnboundedOperationDetector::new(),
+        ));
+        self.register(Arc::new(
+            crate::dos_external_call_loop::DosExternalCallLoopDetector::new(),
+        ));
+        self.register(Arc::new(
+            crate::gas_griefing::GasGriefingDetector::new(),
+        ));
+
+        // Oracle & Price Manipulation
+        self.register(Arc::new(
+            crate::oracle_manipulation::OracleManipulationDetector::new(),
+        ));
+
+        // Cryptographic Security
+        self.register(Arc::new(
+            crate::signature_malleability::SignatureMalleabilityDetector::new(),
+        ));
+
+        // Block Dependency
+        self.register(Arc::new(
+            crate::timestamp::BlockDependencyDetector::new(),
+        ));
+
+        // Type Safety
+        self.register(Arc::new(
+            crate::unsafe_type_casting::UnsafeTypeCastingDetector::new(),
+        ));
+
+        // Centralization
+        self.register(Arc::new(
+            crate::centralization_risk::CentralizationRiskDetector::new(),
         ));
 
         // Staking & Validator Security
