@@ -76,7 +76,10 @@ venv/
 *.temp
 .tmp/
 .temp/
-.claude/
+# Track .claude/agents and .claude/skills (versioned tooling) but
+# keep per-machine settings local.
+.claude/settings.local.json
+.claude/cache/
 debug_test*
 
 # Build/distribution artifacts
