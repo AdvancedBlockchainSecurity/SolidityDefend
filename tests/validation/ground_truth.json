@@ -1856,7 +1856,7 @@
             300
           ],
           "label": "true_positive",
-          "severity": "medium",
+          "severity": "info",
           "description": "Standard approve race condition - no safe alternatives",
           "vulnerability_type": "approve-race"
         }

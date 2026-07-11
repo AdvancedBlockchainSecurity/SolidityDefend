@@ -5,6 +5,21 @@ All notable changes to SolidityDefend will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.13] - 2026-07-11
+
+### Fixed
+- **False-positive reduction across 8 detectors** — audit against heavily-audited safe code (OpenZeppelin v5.x, 247 files; simplified real protocols, 13 files) where every finding is a false positive by construction. OpenZeppelin false positives dropped 40 → 17 (−58%) with no recall regression (vulnerable-corpus findings 334 → 332; ground-truth suite green). (ADV-204)
+  - `missing-access-modifiers`: normalize OpenZeppelin `Context._msgSender()` → `msg.sender` so caller-identity heuristics apply; recognize `_checkAuthorized`/named-unauthorized reverts; skip `super.<fn>()` override delegations; skip proposal-state- and signature-gated executors; treat caller-owned `burn`/`setOperator` as self-scoped (10 OZ FPs → 0)
+  - `array-bounds-check`: only flag when ≥2 array parameters are actually index-accessed in the function body, sparing thin forwarders that delegate length validation to a callee (8 OZ FPs → 2)
+  - `dos-unbounded-operation`: match `for (`/`while(` keywords instead of the bare substring `for` (which matched "before" in comments); skip `.length` write-targets in the parameter-bounded check (2 OZ FPs → 0)
+  - `erc20-approve-race`: downgrade Medium → Info (the SWC-114 race is inherent to the ERC-20/6909 standard, incl. OpenZeppelin v5); skip proxy contracts; require the approve body to write an allowance; relax `increaseAllowance`/`decreaseAllowance` arity for ERC-6909
+  - `proxy-storage-collision`: gate `_delegate(`/`_fallback()` proxy signals on an actual `delegatecall` (fixes governance `Votes._delegate` misfire); add ERC-7201 namespaced-storage early-out (2 OZ FPs → 0)
+  - `unchecked-external-call`: recognize OpenZeppelin `Address.verifyCallResult` as a return-value check (1 OZ FP → 0)
+  - `centralization-risk`: require an actual owner/admin gate before flagging arbitrary token transfers, and fix an `||`/`&&` operator-precedence bug that fired on ownerless contracts (1 OZ FP → 0)
+  - `block-dependency`: exempt `block.timestamp` comparisons against deadline/expiry-named operands (the standard EIP-2612 expiry check) (1 OZ FP → 0)
+
+---
+
 ## [2.0.9] - 2026-02-28
 
 ### Changed

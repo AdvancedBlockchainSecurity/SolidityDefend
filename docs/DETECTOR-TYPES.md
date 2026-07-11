@@ -362,7 +362,7 @@ Legacy list of 209 security detectors organized by category.
 **Total: 15 detectors**
 
 - **`erc1155-batch-validation`** - ERC-1155 Batch Validation (Medium)
-- **`erc20-approve-race`** - ERC-20 Approve Race Condition (Medium)
+- **`erc20-approve-race`** - ERC-20 Approve Race Condition (Info)
 - **`erc20-infinite-approval`** - Infinite Approval Risk (Low)
 - **`erc20-transfer-return-bomb`** - ERC-20 Transfer Return Bomb (Medium)
 - **`erc4337-entrypoint-trust`** - ERC-4337 Untrusted EntryPoint (Critical)

@@ -23,7 +23,9 @@ impl Erc20ApproveRaceDetector {
                 "ERC-20 Approve Race Condition".to_string(),
                 "Detects ERC-20 approve functions vulnerable to front-running race conditions (SWC-114)".to_string(),
                 vec![DetectorCategory::Logic, DetectorCategory::DeFi],
-                Severity::Medium,
+                // Info: the SWC-114 approve race is inherent to the ERC-20 standard itself,
+                // not an implementation bug — mitigation is caller-side.
+                Severity::Info,
             ),
         }
     }
@@ -76,6 +78,11 @@ impl Detector for Erc20ApproveRaceDetector {
             return Ok(findings);
         }
 
+        // FP Reduction: Skip proxy contracts — approve() there merely forwards to the impl.
+        if crate::utils::is_proxy_contract(ctx) {
+            return Ok(findings);
+        }
+
         // FP Reduction: Skip files in directories with dedicated detectors
         // Restaking tokens have standard approve() but are covered by restaking detectors
         // Critical vulnerability files are focused on other patterns (permit, create2, etc.)
@@ -113,8 +120,10 @@ impl Detector for Erc20ApproveRaceDetector {
                 .create_finding(ctx, consolidated_msg, first_line, 0, 40)
                 .with_cwe(362)
                 .with_fix_suggestion(
-                    "Use increaseAllowance/decreaseAllowance pattern, \
-                    or require current allowance == 0 before changes."
+                    "The approve race is inherent to ERC-20/ERC-6909 (SWC-114); \
+                    mitigation is caller-side: set the allowance to 0 before setting \
+                    a new value, or use ERC-2612 permit. Note OpenZeppelin v5 removed \
+                    increaseAllowance/decreaseAllowance."
                         .to_string(),
                 );
             findings.push(finding);
@@ -134,14 +143,14 @@ impl Erc20ApproveRaceDetector {
     fn has_increase_allowance(&self, ctx: &AnalysisContext) -> bool {
         ctx.get_functions()
             .iter()
-            .any(|func| func.name.name == "increaseAllowance" && func.parameters.len() == 2)
+            .any(|func| func.name.name == "increaseAllowance")
     }
 
     /// Checks if contract has decreaseAllowance function
     fn has_decrease_allowance(&self, ctx: &AnalysisContext) -> bool {
         ctx.get_functions()
             .iter()
-            .any(|func| func.name.name == "decreaseAllowance" && func.parameters.len() == 2)
+            .any(|func| func.name.name == "decreaseAllowance")
     }
 
     /// Checks if this appears to be an ERC20 contract
@@ -172,6 +181,13 @@ impl Erc20ApproveRaceDetector {
 
         // Only report if this looks like an ERC20 contract
         if !self.is_erc20_contract(ctx) {
+            return None;
+        }
+
+        // The approve body must actually write an allowance (directly or via _approve).
+        let writes_allowance = func_source.contains("_approve(")
+            || (func_source.contains("allowance") && func_source.contains('='));
+        if !writes_allowance {
             return None;
         }
 
@@ -234,6 +250,6 @@ mod tests {
     fn test_detector_properties() {
         let detector = Erc20ApproveRaceDetector::new();
         assert_eq!(detector.name(), "ERC-20 Approve Race Condition");
-        assert_eq!(detector.default_severity(), Severity::Medium);
+        assert_eq!(detector.default_severity(), Severity::Info);
     }
 }

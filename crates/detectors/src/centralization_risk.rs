@@ -187,10 +187,15 @@ impl CentralizationRiskDetector {
         let has_selfdestruct =
             contract_source.contains("selfdestruct") || contract_source.contains("suicide");
 
-        let has_arbitrary_token_transfer = contract_source.contains("transferFrom(address(this)")
-            || contract_source.contains(".transfer(owner")
-            || contract_source.contains(".transfer(msg.sender")
-                && contract_source.contains("onlyOwner");
+        // Only "owner drains tokens" if there is actually an owner/admin-gated path.
+        let has_owner_gate = contract_source.contains("onlyOwner")
+            || contract_source.contains("onlyAdmin")
+            || contract_source.contains("msg.sender == owner")
+            || contract_source.contains("msg.sender == admin");
+        let has_arbitrary_token_transfer = has_owner_gate
+            && (contract_source.contains("transferFrom(address(this)")
+                || contract_source.contains(".transfer(owner")
+                || contract_source.contains(".transfer(msg.sender"));
 
         // Phase 16 FN Recovery: Check for governance-specific centralization
         // Governance contracts have unique centralization risks even with OZ Ownable

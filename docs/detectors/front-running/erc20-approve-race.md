@@ -1,7 +1,7 @@
 # ERC20 Approve Race Condition
 
 **Detector ID:** `erc20-approve-race`
-**Severity:** Medium
+**Severity:** Info
 **Category:** Front-Running, ERC Standards, MEV
 **CWE:** CWE-362 (Concurrent Execution using Shared Resource with Improper Synchronization)
 **SWC:** SWC-114 (Transaction Order Dependence)
@@ -61,7 +61,7 @@ This creates a **check-time-of-use (TOCTOU)** race condition where the spender c
 
 ### Estimated Impact
 
-- **Severity**: Medium (requires specific conditions and MEV infrastructure)
+- **Severity**: Info (the SWC-114 race is inherent to the ERC-20/6909 standard — every compliant `approve` is affected, including OpenZeppelin v5 which removed `increase/decreaseAllowance`; reported informationally rather than as a per-token defect)
 - **Exploitability**: Moderate (requires mempool access and gas optimization)
 - **Affected Tokens**: Thousands of ERC20 tokens without safe alternatives
 - **Financial Risk**: Potential loss of entire approved amount plus new approval
