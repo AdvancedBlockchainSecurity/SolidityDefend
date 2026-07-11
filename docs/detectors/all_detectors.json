@@ -242,7 +242,7 @@
       "id": "erc20-approve-race",
       "name": "ERC-20 Approve Race Condition",
       "description": "Detects ERC-20 approve functions vulnerable to front-running race conditions (SWC-114)",
-      "severity": "medium",
+      "severity": "info",
       "categories": [
         "Logic",
         "DeFi"

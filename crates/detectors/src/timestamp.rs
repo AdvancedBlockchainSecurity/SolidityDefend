@@ -177,7 +177,9 @@ impl BlockDependencyDetector {
                     else_branch,
                     ..
                 } => {
-                    if self.expression_uses_timestamp(condition) {
+                    if self.expression_uses_timestamp(condition)
+                        && !Self::is_deadline_comparison(condition)
+                    {
                         return true;
                     }
                     if let ast::Statement::Block(b) = then_branch {
@@ -268,6 +270,37 @@ impl BlockDependencyDetector {
             }
             _ => false,
         }
+    }
+
+    /// block.timestamp compared against a deadline/expiry value is the standard
+    /// safe pattern (EIP-2612 permit, order expiry) — not flagged.
+    fn is_deadline_comparison(expr: &ast::Expression<'_>) -> bool {
+        if let ast::Expression::BinaryOperation {
+            operator,
+            left,
+            right,
+            ..
+        } = expr
+        {
+            use ast::BinaryOperator::{Greater, GreaterEqual, Less, LessEqual};
+            if matches!(operator, Greater | GreaterEqual | Less | LessEqual) {
+                return Self::names_deadline(left) || Self::names_deadline(right);
+            }
+        }
+        false
+    }
+
+    fn names_deadline(expr: &ast::Expression<'_>) -> bool {
+        let name = match expr {
+            ast::Expression::Identifier(id) => id.name.to_lowercase(),
+            ast::Expression::MemberAccess { member, .. } => member.name.to_lowercase(),
+            _ => return false,
+        };
+        name.contains("deadline")
+            || name.contains("expir")
+            || name.contains("validuntil")
+            || name.contains("validafter")
+            || name.contains("endtime")
     }
 }
 

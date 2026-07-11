@@ -164,7 +164,9 @@ impl DosUnboundedOperationDetector {
         }
 
         // Pattern 1: Loop over unbounded array
-        let has_loop = func_source.contains("for") || func_source.contains("while");
+        let has_loop = ["for (", "for(", "while (", "while("]
+            .iter()
+            .any(|kw| func_source.contains(kw));
         let loops_over_storage =
             has_loop && (func_source.contains(".length") || func_source.contains("[]"));
 
@@ -481,6 +483,13 @@ impl DosUnboundedOperationDetector {
                 .collect();
 
             if ident.is_empty() {
+                continue;
+            }
+
+            // Skip assignments TO `.length` (e.g. a struct field write like
+            // `plan.length = ...`). A write target is not a loop bound.
+            let after = length_refs[i + 1].trim_start();
+            if after.starts_with('=') && !after.starts_with("==") {
                 continue;
             }
 

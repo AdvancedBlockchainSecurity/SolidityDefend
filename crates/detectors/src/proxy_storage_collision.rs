@@ -169,6 +169,11 @@ impl ProxyStorageCollisionDetector {
         let contract_source_owned = crate::utils::get_contract_source(ctx);
         let contract_source = &contract_source_owned;
 
+        // FP Reduction: ERC-7201 namespaced storage exists to PREVENT collisions.
+        if contract_source.contains("@custom:storage-location erc7201:") {
+            return None;
+        }
+
         // FP Reduction: Skip OZ Upgradeable base contracts (properly managed storage)
         let source_lower = contract_source.to_lowercase();
         if (source_lower.contains("@openzeppelin/contracts-upgradeable")
@@ -231,22 +236,24 @@ impl ProxyStorageCollisionDetector {
             || name_lower == "erc1967proxy"
             || name_lower == "transparentupgradeableproxy";
 
+        // FP Reduction: Check for delegatecall in actual code (not comments)
+        // and exclude staticcall-only contracts (read-only delegation)
+        let has_delegatecall =
+            self.has_in_code(source, "delegatecall") && !self.is_staticcall_only(source);
+
         // Strong proxy signals (EIP-1967 or explicit proxy patterns)
         // FP Reduction: Require function-like patterns (_fallback(), _delegate())
-        // not just variable names containing "_fallback"
+        // not just variable names containing "_fallback". _delegate( is also the
+        // governance vote-delegation function name (OZ Votes), so both signals
+        // additionally require an actual delegatecall in the contract.
         let has_proxy_patterns = source.contains("IMPLEMENTATION_SLOT")
             || source.contains("_IMPLEMENTATION_SLOT")
             || source.contains("_ADMIN_SLOT")
             || source.contains("eip1967")
             || source.contains("EIP1967")
-            || source.contains("_fallback()")
-            || source.contains("_delegate(")
+            || (source.contains("_fallback()") && has_delegatecall)
+            || (source.contains("_delegate(") && has_delegatecall)
             || (source.contains("implementation()") && source.contains("delegatecall"));
-
-        // FP Reduction: Check for delegatecall in actual code (not comments)
-        // and exclude staticcall-only contracts (read-only delegation)
-        let has_delegatecall =
-            self.has_in_code(source, "delegatecall") && !self.is_staticcall_only(source);
 
         // A contract is a proxy if:
         // 1. It has proxy in name AND delegatecall, OR

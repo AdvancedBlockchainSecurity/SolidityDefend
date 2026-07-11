@@ -16,7 +16,7 @@ fn test_erc20_approve_race_metadata() {
 
     assert_eq!(detector.id().0, "erc20-approve-race");
     assert_eq!(detector.name(), "ERC-20 Approve Race Condition");
-    assert_eq!(detector.default_severity(), Severity::Medium);
+    assert_eq!(detector.default_severity(), Severity::Info);
     assert!(detector.is_enabled());
 
     let categories = detector.categories();
@@ -64,11 +64,12 @@ fn test_detector_categories_unique() {
 }
 
 #[test]
-fn test_all_detectors_medium_severity() {
+fn test_all_detectors_expected_severity() {
     let detector1 = Erc20ApproveRaceDetector::new();
     let detector3 = AllowanceToctouDetector::new();
 
-    assert_eq!(detector1.default_severity(), Severity::Medium);
+    // erc20-approve-race is Info: the race is inherent to the ERC-20 standard (SWC-114)
+    assert_eq!(detector1.default_severity(), Severity::Info);
     assert_eq!(detector3.default_severity(), Severity::Medium);
 }
 

@@ -362,7 +362,8 @@ impl UncheckedCallDetector {
             || lower.contains("if(!sent")
             || lower.contains("assert(success")
             || lower.contains("assert(ok")
-            || lower.contains("assert(sent");
+            || lower.contains("assert(sent")
+            || lower.contains("verifycallresult");
 
         has_success_var && has_success_require
     }

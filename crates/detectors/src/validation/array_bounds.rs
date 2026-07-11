@@ -899,6 +899,16 @@ impl ArrayBoundsDetector {
             }
             // Phase 10: Check if function body already has length validation
             let func_source = self.get_function_source(function, ctx);
+            // FP Reduction (Gate 1): Only flag when at least two array params are actually
+            // index-accessed in THIS function. Thin entry points that forward arrays to an
+            // internal implementation rely on the callee for length validation.
+            let indexed_count = array_params
+                .iter()
+                .filter(|(name, _)| Self::is_param_index_accessed(&func_source, name))
+                .count();
+            if indexed_count < 2 {
+                return findings;
+            }
             if self.has_length_validation(&func_source, &array_params) {
                 return findings; // Already has validation
             }
@@ -949,6 +959,25 @@ impl ArrayBoundsDetector {
             }
         }
 
+        false
+    }
+
+    /// Is `name` index-accessed (`name[...]`) in the function source? Word-boundary
+    /// aware (won't match `tokenIds[` for param `ds`), and skips `.name[` (struct member).
+    fn is_param_index_accessed(func_source: &str, name: &str) -> bool {
+        let pattern = format!("{}[", name);
+        let mut from = 0;
+        while let Some(rel) = func_source[from..].find(&pattern) {
+            let abs = from + rel;
+            let ok = func_source[..abs]
+                .chars()
+                .next_back()
+                .map_or(true, |c| !c.is_alphanumeric() && c != '_' && c != '.');
+            if ok {
+                return true;
+            }
+            from = abs + pattern.len();
+        }
         false
     }
 

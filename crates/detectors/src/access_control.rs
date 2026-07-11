@@ -588,7 +588,11 @@ impl MissingModifiersDetector {
 
         let source_lines: Vec<&str> = ctx.source_code.lines().collect();
         if start < source_lines.len() && end < source_lines.len() {
-            source_lines[start..=end].join("\n")
+            // FP Reduction: normalize OZ Context's _msgSender() to msg.sender so
+            // caller-identity heuristics apply uniformly.
+            source_lines[start..=end]
+                .join("\n")
+                .replace("_msgSender()", "msg.sender")
         } else {
             String::new()
         }
@@ -618,6 +622,7 @@ impl MissingModifiersDetector {
             || lower.contains("_checkrole")
             || lower.contains("_checksender")
             || lower.contains("_checkauthority")
+            || lower.contains("_checkauthorized")
             || lower.contains("_requireowner")
             || lower.contains("_requireadmin");
 
@@ -631,6 +636,15 @@ impl MissingModifiersDetector {
             || lower.contains("revert onlyadmin")
             || lower.contains("revert onlyguardian")
             || lower.contains("revert notguardian");
+
+        // Check for named custom-error unauthorized reverts, e.g.
+        // `revert OwnableUnauthorizedAccount(msg.sender)` or `revert AccessDenied()`.
+        let has_named_unauthorized_revert = lower.lines().any(|l| {
+            l.contains("revert")
+                && (l.contains("unauthorized")
+                    || l.contains("accessdenied")
+                    || l.contains("notallowed"))
+        });
 
         // Check for governance role checks (guardian, pauser, keeper, operator)
         let has_governance_check = lower.contains("require(msg.sender == guardian")
@@ -658,6 +672,7 @@ impl MissingModifiersDetector {
             || has_revert_unauthorized
             || has_governance_check
             || has_tx_origin_check
+            || has_named_unauthorized_revert
     }
 
     /// Phase 15 FP Reduction: Check if function has owner check
@@ -802,10 +817,17 @@ impl MissingModifiersDetector {
             }
         }
 
-        // Pattern: function uses msg.sender as first argument to external calls
+        // Pattern: function uses msg.sender as the subject of external calls
         // AND modifies no other state. This covers DeFi withdraw patterns like
-        // aToken.burn(msg.sender, to, amount) where the caller's balance is affected.
-        if func_source.contains(".burn(msg.sender,") || func_source.contains(".burn(msg.sender)") {
+        // aToken.burn(msg.sender, to, amount) where the caller's balance is affected,
+        // as well as caller-scoped operator/approval updates.
+        let collapsed_lower = func_source.replace(['\n', '\r', ' '], "").to_lowercase();
+        if (collapsed_lower.contains("burn(msg.sender,")
+            || collapsed_lower.contains("burn(msg.sender)")
+            || collapsed_lower.contains("_setoperator(msg.sender,")
+            || collapsed_lower.contains("_approve(msg.sender,"))
+            && !self.sends_to_arbitrary_address(func_source)
+        {
             return true;
         }
 
@@ -961,6 +983,35 @@ impl MissingModifiersDetector {
 
         has_target_param
     }
+
+    /// FP Reduction: `execute` functions intentionally permissionless because auth
+    /// comes from proposal state (Governor) or signature verification (ERC-2771),
+    /// not caller identity.
+    fn is_state_or_signature_gated_executor(
+        &self,
+        function_name: &str,
+        func_source: &str,
+        ctx: &AnalysisContext<'_>,
+    ) -> bool {
+        if !function_name.to_lowercase().starts_with("execute") {
+            return false;
+        }
+        let body = func_source.to_lowercase();
+        let src = ctx.source_code.to_lowercase();
+        let governor_gate = body.contains("_validatestatebitmap")
+            || body.contains("proposalstate.")
+            || ((src.contains("governor") || src.contains("igovernor"))
+                && body.contains("proposal"));
+        let has_sig_machinery = src.contains("ecrecover")
+            || src.contains("ecdsa")
+            || src.contains("signermatch")
+            || src.contains("istrustedforwarder");
+        let signature_gate = has_sig_machinery
+            && (body.contains("request")
+                || body.contains("signature")
+                || body.contains("_validate"));
+        governor_gate || signature_gate
+    }
 }
 
 impl Detector for MissingModifiersDetector {
@@ -1098,6 +1149,12 @@ impl Detector for MissingModifiersDetector {
                     continue;
                 }
 
+                // FP Reduction: overrides that delegate to super.<fn>() inherit the parent's
+                // access control (e.g. AccessControl.grantRole carries onlyRole(getRoleAdmin(role))).
+                if func_source.contains(&format!("super.{}(", function.name.name)) {
+                    continue;
+                }
+
                 // Phase 15 FP Reduction: Check if function is in a contract with Ownable
                 // and has require(msg.sender == owner) check
                 if self.has_owner_check(&func_source, &ctx.source_code) {
@@ -1147,6 +1204,14 @@ impl Detector for MissingModifiersDetector {
                 // not the forwarder. Example: transferOwnership(address target, ...)
                 // that just calls target.call(abi.encodeWithSignature("transferOwnership(address)", ...))
                 if self.is_forwarder_function(&func_source, function) {
+                    continue;
+                }
+
+                // FP Reduction: Skip execute() functions gated by proposal state
+                // (Governor) or signature verification (ERC-2771 forwarders) rather
+                // than caller identity.
+                if self.is_state_or_signature_gated_executor(function.name.name, &func_source, ctx)
+                {
                     continue;
                 }
 
