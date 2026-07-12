@@ -1359,8 +1359,7 @@ pub fn is_test_contract(ctx: &AnalysisContext) -> bool {
     // Only match CLEAR test patterns with word boundaries or exact names
 
     // Contract name patterns indicating test/mock - check word boundaries
-    let is_test_name =
-        name == "test"
+    let is_test_name = name == "test"
         || ctx.contract.name.name.starts_with("Test")
         || name.ends_with("_test")
         // Clear mock prefixes/suffixes with proper boundaries
