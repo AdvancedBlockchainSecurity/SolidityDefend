@@ -899,14 +899,26 @@ impl ArrayBoundsDetector {
             }
             // Phase 10: Check if function body already has length validation
             let func_source = self.get_function_source(function, ctx);
-            // FP Reduction (Gate 1): Only flag when at least two array params are actually
-            // index-accessed in THIS function. Thin entry points that forward arrays to an
-            // internal implementation rely on the callee for length validation.
+            // FP Reduction (Gate 1): Flag only when the arrays are actually used
+            // together in a way that can mismatch. Require (a) at least one array
+            // param index-accessed (`name[i]`), AND (b) at least two params
+            // participating in the iteration — where "participating" means either
+            // index-accessed or used as a `name.length` loop bound. This catches the
+            // classic parallel-array bug (loop bounded by `a.length` that indexes
+            // `b[i]` with no length check) while still sparing thin forwarders, which
+            // never index the arrays at all and defer validation to a callee.
             let indexed_count = array_params
                 .iter()
                 .filter(|(name, _)| Self::is_param_index_accessed(&func_source, name))
                 .count();
-            if indexed_count < 2 {
+            let participating = array_params
+                .iter()
+                .filter(|(name, _)| {
+                    Self::is_param_index_accessed(&func_source, name)
+                        || func_source.contains(&format!("{}.length", name))
+                })
+                .count();
+            if indexed_count < 1 || participating < 2 {
                 return findings;
             }
             if self.has_length_validation(&func_source, &array_params) {

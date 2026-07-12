@@ -5,6 +5,11 @@ All notable changes to SolidityDefend will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.14] - 2026-07-12
+
+### Fixed
+- **`array-bounds-check` recall regression from 2.0.13** — the Gate 1 tightening (require array params to be index-accessed) was too aggressive: it suppressed the classic parallel-array bug where a loop is bounded by one array's `.length` and indexes a *different* array (e.g. `for (i < users.length) { … isActive[i] … }`) because only one array used `[i]` syntax. Gate 1 now flags when ≥1 array param is index-accessed AND ≥2 params participate in the iteration (index access or a `name.length` loop bound). Thin forwarders (no index access) stay suppressed; OpenZeppelin false positives remain at 17. (ADV-214)
+
 ## [2.0.13] - 2026-07-11
 
 ### Fixed
