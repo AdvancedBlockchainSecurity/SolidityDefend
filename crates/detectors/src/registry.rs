@@ -480,9 +480,7 @@ impl DetectorRegistry {
         self.register(Arc::new(
             crate::dos_external_call_loop::DosExternalCallLoopDetector::new(),
         ));
-        self.register(Arc::new(
-            crate::gas_griefing::GasGriefingDetector::new(),
-        ));
+        self.register(Arc::new(crate::gas_griefing::GasGriefingDetector::new()));
 
         // Oracle & Price Manipulation
         self.register(Arc::new(
@@ -495,9 +493,7 @@ impl DetectorRegistry {
         ));
 
         // Block Dependency
-        self.register(Arc::new(
-            crate::timestamp::BlockDependencyDetector::new(),
-        ));
+        self.register(Arc::new(crate::timestamp::BlockDependencyDetector::new()));
 
         // Type Safety
         self.register(Arc::new(

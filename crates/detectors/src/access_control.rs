@@ -1873,9 +1873,7 @@ mod tests {
         "#;
         let findings = detect_findings(&detector, source);
         assert!(
-            findings
-                .iter()
-                .any(|f| f.message.contains("setOracle")),
+            findings.iter().any(|f| f.message.contains("setOracle")),
             "setOracle without an access modifier should fire"
         );
         assert!(
@@ -1906,9 +1904,7 @@ mod tests {
         "#;
         let findings = detect_findings(&detector, source);
         assert!(
-            findings
-                .iter()
-                .any(|f| f.message.contains("slashOperator")),
+            findings.iter().any(|f| f.message.contains("slashOperator")),
             "slashOperator without an access modifier should fire"
         );
     }

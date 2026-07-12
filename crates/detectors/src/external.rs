@@ -189,10 +189,11 @@ impl UncheckedCallDetector {
                     }
                 }
                 ast::Statement::VariableDeclaration {
-                    initial_value: Some(ast::Expression::FunctionCall {
-                        function: call_expr,
-                        ..
-                    }),
+                    initial_value:
+                        Some(ast::Expression::FunctionCall {
+                            function: call_expr,
+                            ..
+                        }),
                     ..
                 } => {
                     if self.is_external_call(call_expr) {
@@ -223,10 +224,7 @@ impl UncheckedCallDetector {
                 }
                 // Tuple destructure: (bool success, ) = addr.call{value:}("")
                 // Parser represents as Expression(Assignment { right: FunctionCall })
-                ast::Statement::Expression(ast::Expression::Assignment {
-                    right,
-                    ..
-                }) => {
+                ast::Statement::Expression(ast::Expression::Assignment { right, .. }) => {
                     if let ast::Expression::FunctionCall {
                         function: call_expr,
                         ..
@@ -268,8 +266,7 @@ impl UncheckedCallDetector {
                         func_source,
                     );
                 }
-                ast::Statement::For { body, .. }
-                | ast::Statement::While { body, .. } => {
+                ast::Statement::For { body, .. } | ast::Statement::While { body, .. } => {
                     self.recurse_into_statement(body, ctx, findings, function, func_source);
                 }
                 ast::Statement::If {
@@ -279,7 +276,13 @@ impl UncheckedCallDetector {
                 } => {
                     self.recurse_into_statement(then_branch, ctx, findings, function, func_source);
                     if let Some(else_stmt) = else_branch {
-                        self.recurse_into_statement(else_stmt, ctx, findings, function, func_source);
+                        self.recurse_into_statement(
+                            else_stmt,
+                            ctx,
+                            findings,
+                            function,
+                            func_source,
+                        );
                     }
                 }
                 ast::Statement::TryStatement {

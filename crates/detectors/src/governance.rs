@@ -638,9 +638,9 @@ impl SignatureReplayDetector {
             "nonces[",
             "usednonces[",
             "usedsignatures[",
-            "usedsignatures",   // catches: mapping(...) public usedSignatures; declarations
+            "usedsignatures", // catches: mapping(...) public usedSignatures; declarations
             "usedhashes[",
-            "usedhashes",       // catches: mapping(...) public usedHashes; declarations
+            "usedhashes", // catches: mapping(...) public usedHashes; declarations
             "invalidatenonce",
             "_usenonce",
             "nonce++",
@@ -782,9 +782,16 @@ impl SignatureReplayDetector {
             // Note: "used" alone (without other context) is checked; false positives are
             // filtered by the contract-level check below.
             let nonce_patterns = [
-                "nonce", "nonces", "_nonce", "counter", "replay",
-                "usedhash", "usedsig", "usednonce",
-                "!initialized", "require(!initialized",
+                "nonce",
+                "nonces",
+                "_nonce",
+                "counter",
+                "replay",
+                "usedhash",
+                "usedsig",
+                "usednonce",
+                "!initialized",
+                "require(!initialized",
             ];
             let has_nonce_protection = nonce_patterns
                 .iter()

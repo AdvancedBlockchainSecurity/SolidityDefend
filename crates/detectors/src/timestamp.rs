@@ -81,7 +81,6 @@ impl Detector for BlockDependencyDetector {
         }
 
         for function in ctx.get_functions() {
-
             if let Some((has_dependency, manipulation_type)) =
                 self.has_timestamp_dependency(function, ctx)
             {
@@ -265,9 +264,7 @@ impl BlockDependencyDetector {
                     || self.expression_uses_timestamp(true_expression)
                     || self.expression_uses_timestamp(false_expression)
             }
-            ast::Expression::IndexAccess { base, .. } => {
-                self.expression_uses_timestamp(base)
-            }
+            ast::Expression::IndexAccess { base, .. } => self.expression_uses_timestamp(base),
             _ => false,
         }
     }
@@ -365,7 +362,9 @@ mod tests {
             "lottery using block.timestamp for winner selection should fire"
         );
         assert!(
-            findings.iter().all(|f| f.detector_id.0 == "block-dependency"),
+            findings
+                .iter()
+                .all(|f| f.detector_id.0 == "block-dependency"),
             "all findings should come from block-dependency"
         );
     }
