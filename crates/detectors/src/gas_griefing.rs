@@ -123,6 +123,12 @@ impl GasGriefingDetector {
             return None;
         }
 
+        // Skip multicall/batch-executor patterns -- the caller supplies the call
+        // targets and pays the gas, so there is no third party to grief
+        if self.is_caller_supplied_batch(function, &func_source) {
+            return None;
+        }
+
         // Pattern 1: External .call{} in loop without explicit gas limit
         // Note: .transfer() is SAFE - it has built-in 2300 gas stipend and reverts on failure
         // Note: .send() is SAFE - it has built-in 2300 gas stipend and returns false on failure
@@ -203,6 +209,42 @@ impl GasGriefingDetector {
     /// Check if the .call{} is actually inside a loop body, not just co-existing
     /// in the same function. For example, a function with a comparison loop followed
     /// by a single .call{} at the end is not vulnerable to gas griefing.
+    /// Multicall / batch-executor pattern: the caller supplies the call targets
+    /// and/or the payloads as parameters of this function and pays the gas for
+    /// the batch. A callee that burns gas only fails the caller's own
+    /// transaction, so there is no third party to grief. Covers Multicall3,
+    /// ERC-7821 batch executors, and meta-transaction batchers.
+    ///
+    /// Deliberately does not match push-distribution over a storage recipient
+    /// list (`payees[i].call{value: shares[i]}("")`), where one malicious
+    /// fallback blocks every other payee -- that is the real griefing vector.
+    fn is_caller_supplied_batch(&self, function: &ast::Function<'_>, func_source: &str) -> bool {
+        // The payload is caller-supplied arbitrary calldata, e.g.
+        //   calls[i].target.call{value: calls[i].value}(calls[i].data)
+        //   targets[i].call(data[i])
+        if func_source.contains("].data)")
+            || func_source.contains(".call(data[")
+            || func_source.contains(".call(calls[")
+        {
+            return true;
+        }
+
+        // A value-bearing call is a distribution, not a batch execution: a
+        // blocked recipient harms the others, so keep flagging it.
+        if func_source.contains(".call{value") {
+            return false;
+        }
+
+        // The call target is indexed out of one of this function's own
+        // parameters -- a fixed-selector callback loop over caller-chosen
+        // recipients, e.g. `recipients[i].call(abi.encodeWithSignature(...))`.
+        function.parameters.iter().any(|param| {
+            param.name.as_ref().is_some_and(|n| {
+                func_source.contains(&format!("{}[", n.name)) && func_source.contains("].call")
+            })
+        })
+    }
+
     fn is_call_inside_loop(&self, func_source: &str) -> bool {
         // Strategy: find the loop construct, then check if .call{ appears
         // within its brace-delimited body.
