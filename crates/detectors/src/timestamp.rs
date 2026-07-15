@@ -153,7 +153,17 @@ impl BlockDependencyDetector {
         for stmt in statements {
             match stmt {
                 ast::Statement::Expression(expr) => {
-                    if self.expression_uses_timestamp(expr) {
+                    let flagged = if Self::is_require_or_assert(expr) {
+                        // A guard: the deadline idiom is safe, but any other
+                        // ordering check against a block value is real.
+                        self.expression_uses_timestamp(expr)
+                            && !Self::is_guarded_deadline_check(expr)
+                    } else {
+                        // A store or a plain call: bookkeeping unless the value
+                        // actually drives randomness or selection.
+                        self.timestamp_used_dangerously(expr)
+                    };
+                    if flagged {
                         return true;
                     }
                 }
@@ -166,7 +176,7 @@ impl BlockDependencyDetector {
                     initial_value: Some(expr),
                     ..
                 } => {
-                    if self.expression_uses_timestamp(expr) {
+                    if self.timestamp_used_dangerously(expr) {
                         return true;
                     }
                 }
@@ -281,7 +291,114 @@ impl BlockDependencyDetector {
         {
             use ast::BinaryOperator::{Greater, GreaterEqual, Less, LessEqual};
             if matches!(operator, Greater | GreaterEqual | Less | LessEqual) {
-                return Self::names_deadline(left) || Self::names_deadline(right);
+                // Only the operand that is not `block.*` itself may name the
+                // deadline: `block.timestamp`'s own member is called "timestamp",
+                // so testing it would match every ordering comparison and
+                // suppress real findings.
+                return (!Self::is_block_member(left) && Self::names_deadline(left))
+                    || (!Self::is_block_member(right) && Self::names_deadline(right));
+            }
+        }
+        false
+    }
+
+    /// Whether a block value reaches a *dangerous* consumer -- a hash (randomness
+    /// seed) or a modulo (selection) -- rather than merely being stored or handed
+    /// to a callee.
+    ///
+    /// `lastUpdate = block.timestamp`, a `validAfter: uint48(block.timestamp)`
+    /// struct field, or `swap(..., block.timestamp + 300)` as a deadline argument
+    /// is ordinary bookkeeping. A block value only becomes a vulnerability when it
+    /// drives randomness or selection, where a miner's ~15s nudge changes the
+    /// outcome.
+    fn timestamp_used_dangerously(&self, expr: &ast::Expression<'_>) -> bool {
+        match expr {
+            ast::Expression::FunctionCall {
+                function,
+                arguments,
+                ..
+            } => {
+                if let ast::Expression::Identifier(id) = function {
+                    let is_hash = matches!(
+                        id.name,
+                        "keccak256" | "sha256" | "ripemd160" | "sha3" | "blockhash"
+                    );
+                    if is_hash && arguments.iter().any(|a| self.expression_uses_timestamp(a)) {
+                        return true;
+                    }
+                }
+                arguments.iter().any(|a| self.timestamp_used_dangerously(a))
+            }
+            ast::Expression::BinaryOperation {
+                operator,
+                left,
+                right,
+                ..
+            } => {
+                if matches!(operator, ast::BinaryOperator::Mod)
+                    && (self.expression_uses_timestamp(left)
+                        || self.expression_uses_timestamp(right))
+                {
+                    return true;
+                }
+                self.timestamp_used_dangerously(left) || self.timestamp_used_dangerously(right)
+            }
+            ast::Expression::Assignment { right, .. } => self.timestamp_used_dangerously(right),
+            ast::Expression::UnaryOperation { operand, .. } => {
+                self.timestamp_used_dangerously(operand)
+            }
+            ast::Expression::Conditional {
+                condition,
+                true_expression,
+                false_expression,
+                ..
+            } => {
+                self.timestamp_used_dangerously(condition)
+                    || self.timestamp_used_dangerously(true_expression)
+                    || self.timestamp_used_dangerously(false_expression)
+            }
+            _ => false,
+        }
+    }
+
+    /// True for a `require(...)` / `assert(...)` guard call.
+    fn is_require_or_assert(expr: &ast::Expression<'_>) -> bool {
+        if let ast::Expression::FunctionCall { function, .. } = expr {
+            if let ast::Expression::Identifier(id) = function {
+                return id.name == "require" || id.name == "assert";
+            }
+        }
+        false
+    }
+
+    /// True for a `block.*` member access such as `block.timestamp`.
+    fn is_block_member(expr: &ast::Expression<'_>) -> bool {
+        if let ast::Expression::MemberAccess { expression, .. } = expr {
+            if let ast::Expression::Identifier(id) = expression {
+                return id.name == "block";
+            }
+        }
+        false
+    }
+
+    /// A `require`/`assert` whose argument is a deadline comparison, e.g.
+    /// `require(block.timestamp <= deadline)`.
+    ///
+    /// Deadline checks are overwhelmingly written as `require(...)`, which lands
+    /// in the plain-expression arm of the statement walk -- so before this,
+    /// `is_deadline_comparison` only ever saw `if` conditions and was effectively
+    /// dead code for the dominant real-world pattern.
+    fn is_guarded_deadline_check(expr: &ast::Expression<'_>) -> bool {
+        if let ast::Expression::FunctionCall {
+            function,
+            arguments,
+            ..
+        } = expr
+        {
+            if let ast::Expression::Identifier(id) = function {
+                if id.name == "require" || id.name == "assert" {
+                    return arguments.iter().any(Self::is_deadline_comparison);
+                }
             }
         }
         false
@@ -293,11 +410,14 @@ impl BlockDependencyDetector {
             ast::Expression::MemberAccess { member, .. } => member.name.to_lowercase(),
             _ => return false,
         };
+        // Note: deliberately not bare "time" -- that would match `revealTime`
+        // and suppress the fixed-window commit-reveal true positives.
         name.contains("deadline")
             || name.contains("expir")
             || name.contains("validuntil")
             || name.contains("validafter")
             || name.contains("endtime")
+            || name.contains("timestamp")
     }
 }
 

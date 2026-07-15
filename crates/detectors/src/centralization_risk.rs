@@ -78,9 +78,16 @@ impl Detector for CentralizationRiskDetector {
                 contract_issue
             );
 
+            // Report at the contract's declaration line, not line 1: a file can
+            // hold several contracts, and findings are keyed by
+            // (detector, file, line) downstream, so a fixed line makes distinct
+            // contracts indistinguishable — collapsing real findings and
+            // duplicating others.
+            let line = ctx.contract.location.start().line() as u32;
+
             let finding = self
                 .base
-                .create_finding(ctx, message, 1, 0, 20)
+                .create_finding(ctx, message, line, 0, 20)
                 .with_cwe(269) // CWE-269: Improper Privilege Management
                 .with_cwe(284) // CWE-284: Improper Access Control
                 .with_fix_suggestion(
@@ -134,9 +141,27 @@ impl Detector for CentralizationRiskDetector {
 }
 
 impl CentralizationRiskDetector {
+    /// Source of just the contract under analysis.
+    ///
+    /// The context carries the whole file, but a file often holds several
+    /// contracts. Keying off the whole file lets one `selfdestruct` in a sibling
+    /// contract invent a finding for every other contract in the file, and lets a
+    /// `timelock` keyword in a sibling suppress a finding for one that genuinely
+    /// lacks it. Both directions are wrong, so scope to the contract's own span.
+    fn contract_source(&self, ctx: &AnalysisContext) -> String {
+        let lines: Vec<&str> = ctx.source_code.lines().collect();
+        // Locations are 1-based and the end line is inclusive.
+        let start = (ctx.contract.location.start().line() as usize).saturating_sub(1);
+        let end = (ctx.contract.location.end().line() as usize).min(lines.len());
+        if lines.is_empty() || start >= end {
+            return String::new();
+        }
+        lines[start..end].join("\n")
+    }
+
     fn check_contract_centralization(&self, ctx: &AnalysisContext) -> Option<String> {
         // Clean source to avoid FPs from comments/strings
-        let contract_source = utils::clean_source_for_search(ctx.source_code.as_str());
+        let contract_source = utils::clean_source_for_search(&self.contract_source(ctx));
 
         // P1 FP FIX: Recognize OpenZeppelin Ownable as standard accepted pattern
         // This is the most common access control pattern in production contracts
@@ -146,13 +171,19 @@ impl CentralizationRiskDetector {
 
         // Phase 52 FP Reduction: Detect decentralization patterns
         // If any of these are present, the contract has meaningful decentralization
-        let has_timelock = contract_source.contains("timelock")
-            || contract_source.contains("TimelockController")
-            || contract_source.contains("queueTransaction")
-            || contract_source.contains("delay =")
-            || contract_source.contains("executeTransaction")
-            || (contract_source.contains("timestamp")
-                && contract_source.contains("require(block.timestamp >="));
+        // Matched case-insensitively: delay constants are conventionally SCREAMING
+        //_CASE (`SELFDESTRUCT_DELAY`), which a case-sensitive match misses. The
+        // `block.timestamp >=` check likewise omits the `require(` prefix, since a
+        // long require commonly wraps across lines.
+        let contract_source_lower = contract_source.to_lowercase();
+        let has_timelock = contract_source_lower.contains("timelock")
+            || contract_source_lower.contains("timelockcontroller")
+            || contract_source_lower.contains("queuetransaction")
+            || contract_source_lower.contains("delay =")
+            || contract_source_lower.contains("_delay")
+            || contract_source_lower.contains("executetransaction")
+            || (contract_source_lower.contains("timestamp")
+                && contract_source_lower.contains("block.timestamp >="));
 
         let has_multisig = contract_source.contains("multisig")
             || contract_source.contains("MultiSig")
@@ -188,10 +219,14 @@ impl CentralizationRiskDetector {
             contract_source.contains("selfdestruct") || contract_source.contains("suicide");
 
         // Only "owner drains tokens" if there is actually an owner/admin-gated path.
+        // `manager` counts: a manager-gated rug pull is the same centralization
+        // risk under a different name, and is the only gate some contracts use.
         let has_owner_gate = contract_source.contains("onlyOwner")
             || contract_source.contains("onlyAdmin")
+            || contract_source.contains("onlyManager")
             || contract_source.contains("msg.sender == owner")
-            || contract_source.contains("msg.sender == admin");
+            || contract_source.contains("msg.sender == admin")
+            || contract_source.contains("msg.sender == manager");
         let has_arbitrary_token_transfer = has_owner_gate
             && (contract_source.contains("transferFrom(address(this)")
                 || contract_source.contains(".transfer(owner")
@@ -245,7 +280,10 @@ impl CentralizationRiskDetector {
         }
 
         // Pattern 1: Dangerous centralization - selfdestruct controlled by single owner
-        if has_selfdestruct && !has_multisig && !has_timelock {
+        // The owner gate is required, not incidental: an *ungated* selfdestruct is
+        // callable by anyone, so "controllable by single address" would be false --
+        // that is missing access control, which selfdestruct-abuse already reports.
+        if has_selfdestruct && has_owner_gate && !has_multisig && !has_timelock {
             return Some(
                 "Contract has selfdestruct controllable by single address. \
                 Owner can permanently destroy contract and steal funds"
