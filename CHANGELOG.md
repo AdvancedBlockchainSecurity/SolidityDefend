@@ -5,6 +5,17 @@ All notable changes to SolidityDefend will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.15] - 2026-07-15
+
+### Fixed
+- **`centralization-risk` whole-file scoping (72 → 20 findings)** — `check_contract_centralization` read the entire file instead of the contract under analysis. Because the detector registry runs once per contract, a single `selfdestruct` anywhere in a file invented a finding for *every* contract in it; 46 of the 72 were flagged on contracts containing no `selfdestruct` at all. The bug ran inverse too, letting a `timelock` keyword in a sibling contract suppress a genuinely vulnerable one. Findings are now scoped to the contract's own span. Pattern 1 additionally requires an owner gate — an *ungated* `selfdestruct` is callable by anyone, so "controllable by single address" was false; that case belongs to `selfdestruct-abuse`. The timelock heuristic is now case-insensitive (`SELFDESTRUCT_DELAY` was missed) and `has_owner_gate` recognizes `manager` gates. (ADV-231)
+- **`block-dependency` over-reporting (21 → 5 findings)** — `is_deadline_comparison` was only applied to `if` conditions, leaving it dead code for `require(block.timestamp <= deadline)`, the dominant real-world idiom; it now covers `require`/`assert` arguments. A block value that is merely stored (`lastUpdate = block.timestamp`), placed in a struct field, or passed as a deadline argument is bookkeeping — it is now flagged only when it feeds a hash (randomness) or a modulo (selection). `names_deadline` matches `timestamp`, guarded so `block.timestamp`'s own member cannot match and suppress every ordering comparison. (ADV-231)
+- **`gas-griefing` false positives (13 → 4 findings)** — the detector flagged any `.call` in a loop without a gas limit without asking who controls the batch. In the Multicall/ERC-7821 pattern the caller supplies the targets and pays the gas, so a callee burning gas only fails the submitter's own transaction. Caller-supplied batches are skipped; value-bearing distribution over a storage recipient list still fires. (ADV-231)
+- **Contract-level findings reported at line 1** — `centralization-risk`, `erc4337-entrypoint-trust`, and `hardware-wallet-delegation` hardcoded line 1, so the CLI's `(detector, file, line)` deduplication collapsed genuinely distinct per-contract findings. They now report at the contract's declaration line. (ADV-230)
+
+### Changed
+- Ground-truth validation: false positives 170 → 93 (−45%), precision 46.7% → 61.6%, F1 0.637 → 0.762. Recall unchanged at 149/149 with 0 clean-contract false positives. Every change is a correctness fix verified against source; no `known_false_positives` suppression was used. (ADV-231)
+
 ## [2.0.14] - 2026-07-12
 
 ### Fixed
